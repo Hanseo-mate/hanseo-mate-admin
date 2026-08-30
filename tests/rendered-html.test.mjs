@@ -94,11 +94,17 @@ test("does not show implementation jargon in staff-facing copy", async () => {
   );
 });
 
-test("exports site metadata and social image", async () => {
+test("exports site metadata, brand icons, and social image", async () => {
   const html = await readFile(new URL("out/index.html", root), "utf8");
   assert.match(html, /name="robots" content="noindex, nofollow"/);
   assert.match(html, /property="og:image" content="https:\/\/hsmate-admin\.web\.app\/og\.png"/);
-  await access(new URL("out/og.png", root));
+  assert.match(html, /rel="icon" href="\/clock-01\.png"/);
+  assert.match(html, /rel="apple-touch-icon" href="\/clock-01\.png"/);
+  assert.match(html, /src="\/clock-01\.png"/);
+  await Promise.all([
+    access(new URL("out/og.png", root)),
+    access(new URL("out/clock-01.png", root)),
+  ]);
 });
 
 test("keeps deployment configuration aligned with static export and the production API", async () => {

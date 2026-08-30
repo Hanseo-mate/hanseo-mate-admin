@@ -18,6 +18,7 @@ import {
   UsersThree,
   X,
 } from "@phosphor-icons/react";
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { type ComponentType, useEffect, useState } from "react";
@@ -213,6 +214,21 @@ function isItemActive(pathname: string, item: NavigationItem) {
   return paths.some((path) => path === "/" ? pathname === "/" : pathname.startsWith(path));
 }
 
+function BrandIcon() {
+  return (
+    <span className="brand-mark" aria-hidden="true">
+      <Image
+        className="brand-mark-image"
+        src="/clock-01.png"
+        alt=""
+        width={1024}
+        height={1024}
+        sizes="34px"
+      />
+    </span>
+  );
+}
+
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = normalizePath(usePathname());
   const [menuOpen, setMenuOpen] = useState(false);
@@ -244,7 +260,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <div className="auth-shell">
         <header className="auth-header">
           <Link className="brand-block brand-block-auth" href="/" aria-label="한서메이트 관리자 홈">
-            <span className="brand-mark" aria-hidden="true">H</span>
+            <BrandIcon />
             <span className="brand-copy">
               <strong>한서메이트</strong>
               <small>관리자</small>
@@ -268,7 +284,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <aside id="admin-sidebar" className={`sidebar ${menuOpen ? "open" : ""}`}>
         <div className="sidebar-header">
           <Link className="brand-block" href="/" aria-label="한서메이트 관리자 홈">
-            <span className="brand-mark" aria-hidden="true">H</span>
+            <BrandIcon />
             <span className="brand-copy">
               <strong>한서메이트</strong>
               <small>관리자</small>

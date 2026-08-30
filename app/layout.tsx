@@ -11,6 +11,23 @@ export const metadata: Metadata = {
   },
   description: "학생회 공지, 시스템 공지, 일정, 버스 시간표, 캠퍼스맵, 홈 포스터, 동아리와 학사 자료를 관리하는 한서메이트 운영 콘솔입니다.",
   applicationName: "한서메이트 관리자",
+  icons: {
+    icon: [
+      {
+        url: "/clock-01.png",
+        type: "image/png",
+        sizes: "1024x1024",
+      },
+    ],
+    shortcut: "/clock-01.png",
+    apple: [
+      {
+        url: "/clock-01.png",
+        type: "image/png",
+        sizes: "1024x1024",
+      },
+    ],
+  },
   robots: { index: false, follow: false },
   openGraph: {
     type: "website",
