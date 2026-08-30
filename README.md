@@ -1,18 +1,25 @@
 # 한서메이트 관리자
 
-학생회 공지, 동아리, 전공·교양 시간표를 관리하는 한서메이트 운영 콘솔입니다.
+학생회 공지, 시스템 공지, 일정, 버스 시간표, 캠퍼스맵, 홈 포스터, 동아리와 학사 자료를 관리하는 한서메이트 운영 콘솔입니다.
 
 ## 화면
 
-- `/` 대시보드
+- `/` 실제 운영 데이터 대시보드
+- `/notices/manage` 학생회 공지 목록·상세·수정·삭제
 - `/notices/new` 학생회 공지 등록
-- `/notices/manage` 공지 ID 기준 수정·삭제
+- `/system-notices/manage` 시스템 공지 조회·등록·수정·삭제
+- `/calendars/manage` 학생회 일정 월간 조회·등록·수정·삭제
+- `/bus-schedules/manage` 버스 시간표 조회·등록·교체
+- `/campus-map/manage` 캠퍼스 장소 조회·등록·전체수정·삭제
+- `/posters/manage` 홈 포스터 등록·교체·삭제
+- `/clubs/manage` 동아리 목록·상세·소개·이미지 관리
 - `/clubs/new` 동아리 기본 등록
-- `/clubs/manage` 동아리 소개·이미지·삭제 통합 관리
-- `/courses/major` 전공 Excel 업로드
-- `/courses/general` 교양 Excel 업로드
+- `/courses/major` 전공 강의시간표 Excel 업로드
+- `/courses/general` 교양 강의시간표 Excel 업로드
+- `/courses/equivalent` 동일교과목 Excel 업로드
+- `/courses/cross-major` 타학과 전공인정 Excel 업로드
 
-공지와 동아리 관리자 API에는 목록·상세 GET 명세가 없어서 수정 화면은 서버 ID와 현재 값을 직접 입력하는 방식입니다.
+관리자 화면은 문서에 명시된 운영 API만 사용합니다. 전체 검색, 최근 관리자 활동, 업로드 이력, 차트처럼 서버가 제공하지 않는 데이터는 화면에 만들지 않습니다.
 
 ## 실행
 
@@ -31,8 +38,9 @@ NEXT_PUBLIC_API_BASE_URL=https://api.example.com
 
 ```bash
 npm run lint
+npx tsc --noEmit --incremental false
 npm run build
-node --test tests/rendered-html.test.mjs
+node --test tests/*.test.mjs
 npm run deploy:firebase
 ```
 

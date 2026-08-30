@@ -189,6 +189,115 @@ test("uploads poster images as browser-managed multipart form data", async () =>
   assert.doesNotMatch(source, /\.set\(\s*["']Content-Type["']/i);
 });
 
+test("creates poster preview URLs inside an effect and revokes the effect-owned URL", async () => {
+  const source = await readPosterPage();
+  const sourceFile = ts.createSourceFile(
+    pageUrl.pathname,
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TSX,
+  );
+  let posterImageFunction;
+
+  function findPosterImage(node) {
+    if (
+      ts.isFunctionDeclaration(node) &&
+      node.name?.text === "PosterImage"
+    ) {
+      posterImageFunction = node;
+      return;
+    }
+    ts.forEachChild(node, findPosterImage);
+  }
+
+  findPosterImage(sourceFile);
+  assert.ok(posterImageFunction, "포스터 미리보기 컴포넌트가 필요합니다.");
+
+  const componentSource = posterImageFunction.getText(sourceFile);
+  assert.doesNotMatch(
+    componentSource,
+    /useMemo\s*\([\s\S]*?URL\.createObjectURL/,
+    "렌더링 중 만든 URL은 React 개발 모드의 effect 정리 과정에서 너무 일찍 해제될 수 있습니다.",
+  );
+
+  const effectMatch = componentSource.match(
+    /useEffect\s*\(\s*\(\)\s*=>\s*\{([\s\S]*?)\}\s*,\s*\[\s*file\s*\]\s*\)/,
+  );
+  assert.ok(effectMatch, "선택한 파일이 바뀔 때 미리보기 URL을 만드는 effect가 필요합니다.");
+
+  const effectSource = effectMatch[1];
+  const createdUrl = effectSource.match(
+    /const\s+([A-Za-z_$][\w$]*)\s*=\s*URL\.createObjectURL\(\s*file\s*\)/,
+  );
+  assert.ok(createdUrl, "effect 안에서 선택한 파일의 미리보기 URL을 만들어야 합니다.");
+
+  const urlName = createdUrl[1];
+  assert.match(
+    effectSource,
+    new RegExp(`\\bimageRef\\.current\\.src\\s*=\\s*${urlName}\\b`),
+    "effect에서 만든 URL을 미리보기 이미지에 연결해야 합니다.",
+  );
+  assert.match(
+    effectSource,
+    new RegExp(`return\\s*\\(\\)\\s*=>\\s*URL\\.revokeObjectURL\\(\\s*${urlName}\\s*\\)`),
+    "effect 정리 함수는 해당 effect에서 만든 URL만 해제해야 합니다.",
+  );
+});
+
+test("returns a canceled replacement preview to the server poster image", async () => {
+  const source = await readPosterPage();
+  const sourceFile = ts.createSourceFile(
+    pageUrl.pathname,
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TSX,
+  );
+  let posterImageFunction;
+
+  function findPosterImage(node) {
+    if (
+      ts.isFunctionDeclaration(node) &&
+      node.name?.text === "PosterImage"
+    ) {
+      posterImageFunction = node;
+      return;
+    }
+    ts.forEachChild(node, findPosterImage);
+  }
+
+  findPosterImage(sourceFile);
+  assert.ok(posterImageFunction, "포스터 미리보기 컴포넌트가 필요합니다.");
+
+  const componentSource = posterImageFunction.getText(sourceFile);
+  assert.match(
+    componentSource,
+    /<img\s+ref=\{imageRef\}\s+src=\{file\s*\?\s*undefined\s*:\s*imageUrl\}/,
+    "교체 선택을 취소하면 이미 해제된 미리보기 URL이 아니라 서버 포스터 이미지로 돌아가야 합니다.",
+  );
+});
+
+test("resets both poster file inputs and connects new and replacement files to previews", async () => {
+  const source = await readPosterPage();
+  const fileInputs = [...source.matchAll(/<input\b[\s\S]*?type=["']file["'][\s\S]*?\/>/g)]
+    .map((match) => match[0]);
+
+  assert.equal(fileInputs.length, 2, "신규 등록과 이미지 교체용 파일 선택창이 각각 필요합니다.");
+  for (const input of fileInputs) {
+    assert.match(
+      input,
+      /onClick=\{\(event\)\s*=>\s*\{\s*event\.currentTarget\.value\s*=\s*["']["'];?\s*\}\}/,
+      "같은 사진도 다시 선택할 수 있도록 파일 선택창 값을 초기화해야 합니다.",
+    );
+  }
+
+  assert.match(source, /<PosterImage\s+file=\{newFile\}/);
+  assert.match(source, /<PosterImage[\s\S]*?file=\{replacementFile\}/);
+  assert.match(source, /onChange=\{\(event\)\s*=>\s*chooseNewFile\(/);
+  assert.match(source, /onChange=\{\(event\)\s*=>\s*chooseReplacement\(/);
+});
+
 test("uses only the documented poster response fields and avoids developer-facing copy", async () => {
   const source = await readPosterPage();
   const responseShapes = findPosterResponseFields(source);

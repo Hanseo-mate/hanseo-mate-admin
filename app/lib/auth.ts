@@ -54,12 +54,14 @@ export function getAdminSession(): AdminSession | null {
 
     if (!valid) {
       removeStoredSession();
+      window.setTimeout(notifySessionChange, 0);
       return null;
     }
 
     return value as AdminSession;
   } catch {
     removeStoredSession();
+    window.setTimeout(notifySessionChange, 0);
     return null;
   }
 }

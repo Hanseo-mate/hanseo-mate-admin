@@ -1,5 +1,6 @@
 "use client";
 
+import { ArrowLeft, ImageSquare, Info } from "@phosphor-icons/react";
 import Link from "next/link";
 import {
   type FormEvent,
@@ -11,6 +12,7 @@ import {
 } from "react";
 import { AdminLoginNotice } from "../../components/AdminLoginNotice";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
+import { UnsavedChangesDialog } from "../../components/UnsavedChangesDialog";
 import { ADMIN_SESSION_EVENT, getAdminSession } from "../../lib/auth";
 import { apiFetch, getErrorText } from "../../lib/api";
 import {
@@ -54,17 +56,20 @@ function validateImage(file: File) {
 }
 
 function ImagePreview({ file, imageUrl, alt }: { file: File | null; imageUrl: string; alt: string }) {
-  const objectUrl = useMemo(() => file ? URL.createObjectURL(file) : "", [file]);
+  const imageRef = useRef<HTMLImageElement | null>(null);
 
-  useEffect(() => () => {
-    if (objectUrl) URL.revokeObjectURL(objectUrl);
-  }, [objectUrl]);
+  useEffect(() => {
+    if (!file || !imageRef.current) return;
+    const objectUrl = URL.createObjectURL(file);
+    imageRef.current.src = objectUrl;
+    return () => URL.revokeObjectURL(objectUrl);
+  }, [file]);
 
-  if (objectUrl || imageUrl) {
+  if (file || imageUrl) {
     // eslint-disable-next-line @next/next/no-img-element
-    return <img src={objectUrl || imageUrl} alt={alt} />;
+    return <img ref={imageRef} src={file ? undefined : imageUrl} alt={alt} />;
   }
-  return <div className="image-placeholder"><span>+</span><small>등록된 사진 없음</small></div>;
+  return <div className="image-placeholder"><ImageSquare size={24} aria-hidden="true" /><small>등록된 사진 없음</small></div>;
 }
 
 function updateUrlClubId(clubId: number | null) {
@@ -439,7 +444,8 @@ export default function ManageClubPage() {
 
   return (
     <AdminLoginNotice returnTo="/clubs/manage">
-    <div className="stack-lg">
+      <UnsavedChangesDialog dirty={hasUnsavedChanges} />
+      <div className="stack-lg">
       <div className="club-management-layout">
         <aside className="panel club-list-panel" aria-labelledby="club-list-title">
           <div className="club-list-heading">
@@ -545,7 +551,7 @@ export default function ManageClubPage() {
 
           {!selectedClub ? (
             <section className="panel club-editor-empty">
-              <span aria-hidden="true">←</span>
+              <span aria-hidden="true"><ArrowLeft size={22} /></span>
               <h2>수정할 동아리를 선택하세요.</h2>
               <p>목록에서 동아리를 선택하면 기존 소개와 사진을 불러옵니다.</p>
             </section>
@@ -602,7 +608,7 @@ export default function ManageClubPage() {
                     </div>
 
                     <section className="notice-callout" role="note">
-                      <div className="callout-icon" aria-hidden="true">i</div>
+                      <div className="callout-icon" aria-hidden="true"><Info size={18} /></div>
                       <div>
                         <strong>비워서 저장한 선택 항목은 앱에서도 삭제됩니다.</strong>
                         <p>동아리 소개, 주요 활동, 링크와 모집 안내를 지울 때는 한 번 더 확인해 주세요.</p>

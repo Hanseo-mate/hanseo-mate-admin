@@ -1,5 +1,6 @@
 "use client";
 
+import { Info } from "@phosphor-icons/react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
@@ -13,7 +14,18 @@ import { ApiError, apiFetch, getErrorText } from "../lib/api";
 
 function getReturnPath() {
   const value = new URLSearchParams(window.location.search).get("returnTo");
-  return value?.startsWith("/") && !value.startsWith("//") ? value : "/";
+  if (!value?.startsWith("/") || value.startsWith("//") || value.includes("\\")) {
+    return "/";
+  }
+
+  try {
+    const target = new URL(value, window.location.origin);
+    return target.origin === window.location.origin
+      ? `${target.pathname}${target.search}${target.hash}`
+      : "/";
+  } catch {
+    return "/";
+  }
 }
 
 function getLoginErrorText(error: unknown) {
@@ -38,11 +50,15 @@ export default function AdminLoginPage() {
   const [returnPath, setReturnPath] = useState("/");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [sessionNotice, setSessionNotice] = useState("");
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
       setCurrentLoginId(getAdminSession()?.loginId ?? null);
       setReturnPath(getReturnPath());
+      if (new URLSearchParams(window.location.search).get("expired") === "1") {
+        setSessionNotice("로그인이 만료되었습니다. 계속하려면 다시 로그인해 주세요.");
+      }
       setSessionChecked(true);
     }, 0);
     return () => window.clearTimeout(timeoutId);
@@ -113,6 +129,15 @@ export default function AdminLoginPage() {
           </div>
         ) : (
           <form className="admin-form" onSubmit={handleSubmit}>
+            {sessionNotice && (
+              <div className="notice-callout" role="status">
+                <div className="callout-icon" aria-hidden="true"><Info size={18} /></div>
+                <div>
+                  <strong>로그인이 만료되었습니다.</strong>
+                  <p>{sessionNotice}</p>
+                </div>
+              </div>
+            )}
             {error && (
               <div className="feedback feedback-error" role="alert">
                 <strong>로그인할 수 없습니다.</strong>

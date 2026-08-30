@@ -1,8 +1,26 @@
 "use client";
 
+import type { IconProps } from "@phosphor-icons/react";
+import {
+  Broadcast,
+  Bus,
+  CalendarDots,
+  CaretRight,
+  ImageSquare,
+  List,
+  MapTrifold,
+  Megaphone,
+  Plus,
+  ShieldCheck,
+  SignOut,
+  SquaresFour,
+  UploadSimple,
+  UsersThree,
+  X,
+} from "@phosphor-icons/react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
+import { type ComponentType, useEffect, useState } from "react";
 import {
   ADMIN_SESSION_EVENT,
   type AdminSession,
@@ -13,6 +31,8 @@ import {
 type NavigationItem = {
   href: string;
   label: string;
+  icon: ComponentType<IconProps>;
+  matches?: string[];
 };
 
 type NavigationGroup = {
@@ -20,66 +40,189 @@ type NavigationGroup = {
   items: NavigationItem[];
 };
 
+type PageInfo = {
+  title: string;
+  description: string;
+  section: string;
+  action?: { href: string; label: string };
+};
+
 const navigation: NavigationGroup[] = [
   {
-    label: "홈",
-    items: [{ href: "/", label: "홈" }],
+    label: "운영 현황",
+    items: [{ href: "/", label: "대시보드", icon: SquaresFour }],
   },
   {
-    label: "홈 화면 관리",
-    items: [{ href: "/posters/manage", label: "포스터 관리" }],
-  },
-  {
-    label: "공지 관리",
+    label: "콘텐츠 운영",
     items: [
-      { href: "/notices/new", label: "공지 등록" },
-      { href: "/notices/manage", label: "공지 수정·삭제" },
+      {
+        href: "/notices/manage",
+        label: "학생회 공지",
+        icon: Megaphone,
+        matches: ["/notices/manage", "/notices/new"],
+      },
+      {
+        href: "/system-notices/manage",
+        label: "시스템 공지",
+        icon: Broadcast,
+      },
+      { href: "/calendars/manage", label: "학생회 일정", icon: CalendarDots },
+      { href: "/posters/manage", label: "홈 포스터", icon: ImageSquare },
     ],
   },
   {
-    label: "학생회 일정",
-    items: [{ href: "/calendars/manage", label: "일정 관리" }],
-  },
-  {
-    label: "동아리 관리",
+    label: "교통 정보",
     items: [
-      { href: "/clubs/new", label: "동아리 등록" },
-      { href: "/clubs/manage", label: "동아리 조회·수정" },
+      {
+        href: "/bus-schedules/manage",
+        label: "버스 시간표",
+        icon: Bus,
+      },
     ],
   },
   {
-    label: "시간표 관리",
+    label: "캠퍼스 안내",
     items: [
-      { href: "/courses/major", label: "전공 시간표 업로드" },
-      { href: "/courses/general", label: "교양 시간표 업로드" },
+      {
+        href: "/campus-map/manage",
+        label: "캠퍼스맵",
+        icon: MapTrifold,
+      },
+    ],
+  },
+  {
+    label: "학사 데이터",
+    items: [
+      {
+        href: "/courses/major",
+        label: "강의시간표 업로드",
+        icon: UploadSimple,
+        matches: ["/courses/major", "/courses/general"],
+      },
+      {
+        href: "/courses/equivalent",
+        label: "동일교과목 업로드",
+        icon: UploadSimple,
+      },
+      {
+        href: "/courses/cross-major",
+        label: "타학과 전공인정 업로드",
+        icon: UploadSimple,
+      },
+    ],
+  },
+  {
+    label: "동아리 운영",
+    items: [
+      {
+        href: "/clubs/manage",
+        label: "동아리 관리",
+        icon: UsersThree,
+        matches: ["/clubs/manage", "/clubs/new"],
+      },
     ],
   },
 ];
 
-const pageTitles: Record<string, { title: string; description: string }> = {
-  "/": { title: "홈", description: "필요한 관리 업무를 선택해 주세요." },
-  "/posters/manage": { title: "포스터 관리", description: "한서메이트 메인 화면에 보여줄 포스터 이미지를 관리합니다." },
-  "/notices/new": { title: "공지 등록", description: "학생회 공지를 작성해 등록합니다." },
-  "/notices/manage": { title: "공지 수정·삭제", description: "목록에서 공지를 선택해 내용을 수정하거나 삭제합니다." },
-  "/calendars/manage": { title: "학생회 일정 관리", description: "학생들에게 안내할 일정을 확인하고 등록하거나 수정합니다." },
-  "/clubs/new": { title: "동아리 등록", description: "동아리 이름과 분과를 등록합니다." },
-  "/clubs/manage": { title: "동아리 조회·수정", description: "목록에서 동아리를 선택해 정보와 사진을 관리합니다." },
-  "/login": { title: "관리자 로그인", description: "포스터, 공지, 학생회 일정, 동아리, 시간표 관리에 사용할 계정으로 로그인합니다." },
-  "/courses/major": { title: "전공 시간표 파일 업로드", description: "전공 시간표 엑셀 파일을 업로드합니다." },
-  "/courses/general": { title: "교양 시간표 파일 업로드", description: "교양 시간표 엑셀 파일을 업로드합니다." },
+const pageTitles: Record<string, PageInfo> = {
+  "/": {
+    title: "운영 대시보드",
+    description: "학생회 콘텐츠와 학사 데이터의 현재 운영 현황을 확인합니다.",
+    section: "운영 현황",
+  },
+  "/posters/manage": {
+    title: "홈 포스터",
+    description: "앱 홈 화면에 사용할 포스터 이미지를 등록하고 관리합니다.",
+    section: "콘텐츠 운영",
+  },
+  "/notices/new": {
+    title: "학생회 공지 등록",
+    description: "학생회에서 직접 게시할 공지 내용과 파일을 등록합니다.",
+    section: "학생회 공지",
+  },
+  "/notices/manage": {
+    title: "학생회 공지",
+    description: "등록된 공지를 조회하고 내용과 첨부파일을 관리합니다.",
+    section: "콘텐츠 운영",
+    action: { href: "/notices/new", label: "학생회 공지 등록" },
+  },
+  "/system-notices/manage": {
+    title: "시스템 공지",
+    description: "앱 이용 중 안내할 점검·업데이트 소식을 등록하고 관리합니다.",
+    section: "콘텐츠 운영",
+  },
+  "/calendars/manage": {
+    title: "학생회 일정",
+    description: "학생회 일정을 날짜별로 확인하고 등록, 수정, 삭제합니다.",
+    section: "콘텐츠 운영",
+  },
+  "/bus-schedules/manage": {
+    title: "버스 시간표",
+    description: "시내버스·통근버스·학교 셔틀 시간표 사진을 등록하고 교체합니다.",
+    section: "교통 정보",
+  },
+  "/campus-map/manage": {
+    title: "캠퍼스맵",
+    description: "두 캠퍼스의 음식점, 카페, 강의건물과 편의시설을 등록하고 관리합니다.",
+    section: "캠퍼스 안내",
+  },
+  "/clubs/new": {
+    title: "동아리 등록",
+    description: "새 동아리의 이름과 분과를 등록합니다.",
+    section: "동아리 운영",
+  },
+  "/clubs/manage": {
+    title: "동아리 관리",
+    description: "동아리 정보와 소개, 이미지를 조회하고 관리합니다.",
+    section: "동아리 운영",
+    action: { href: "/clubs/new", label: "동아리 등록" },
+  },
+  "/login": {
+    title: "관리자 로그인",
+    description: "관리자 권한이 있는 계정으로 로그인합니다.",
+    section: "계정",
+  },
+  "/courses/major": {
+    title: "강의시간표 업로드",
+    description: "전공 또는 교양 강의시간표 파일을 분석해 강좌 데이터를 반영합니다.",
+    section: "학사 데이터",
+  },
+  "/courses/general": {
+    title: "강의시간표 업로드",
+    description: "전공 또는 교양 강의시간표 파일을 분석해 강좌 데이터를 반영합니다.",
+    section: "학사 데이터",
+  },
+  "/courses/equivalent": {
+    title: "동일교과목 업로드",
+    description: "서로 같은 과목으로 인정되는 교과목 정보를 엑셀 파일로 등록합니다.",
+    section: "학사 데이터",
+  },
+  "/courses/cross-major": {
+    title: "타학과 전공인정 업로드",
+    description: "다른 학과 과목의 전공 인정 기준을 엑셀 파일로 등록합니다.",
+    section: "학사 데이터",
+  },
 };
 
-function isActive(pathname: string, href: string) {
-  return href === "/" ? pathname === href : pathname.startsWith(href);
+function normalizePath(pathname: string) {
+  return pathname === "/" ? pathname : pathname.replace(/\/$/, "");
+}
+
+function isItemActive(pathname: string, item: NavigationItem) {
+  const paths = item.matches ?? [item.href];
+  return paths.some((path) => path === "/" ? pathname === "/" : pathname.startsWith(path));
 }
 
 export function AppShell({ children }: { children: React.ReactNode }) {
-  const pathname = usePathname();
+  const pathname = normalizePath(usePathname());
   const [menuOpen, setMenuOpen] = useState(false);
   const [adminSession, setAdminSession] = useState<AdminSession | null>(null);
   const [sessionChecked, setSessionChecked] = useState(false);
-  const normalizedPath = pathname === "/" ? pathname : pathname.replace(/\/$/, "");
-  const currentPage = pageTitles[normalizedPath] ?? pageTitles["/"];
+  const currentPage = pageTitles[pathname] ?? {
+    title: "관리자",
+    description: "한서메이트 운영 업무를 관리합니다.",
+    section: "관리자",
+  };
 
   useEffect(() => {
     const updateSession = () => {
@@ -96,6 +239,23 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     setAdminSession(null);
   }
 
+  if (pathname === "/login") {
+    return (
+      <div className="auth-shell">
+        <header className="auth-header">
+          <Link className="brand-block brand-block-auth" href="/" aria-label="한서메이트 관리자 홈">
+            <span className="brand-mark" aria-hidden="true">H</span>
+            <span className="brand-copy">
+              <strong>한서메이트</strong>
+              <small>관리자</small>
+            </span>
+          </Link>
+        </header>
+        <main className="auth-content">{children}</main>
+      </div>
+    );
+  }
+
   return (
     <div className="admin-shell">
       <button
@@ -106,33 +266,55 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       />
 
       <aside id="admin-sidebar" className={`sidebar ${menuOpen ? "open" : ""}`}>
-        <div className="brand-block">
-          <div className="brand-mark" aria-hidden="true">한</div>
-          <div>
-            <strong>한서메이트</strong>
-            <span>학생회 관리 페이지</span>
-          </div>
+        <div className="sidebar-header">
+          <Link className="brand-block" href="/" aria-label="한서메이트 관리자 홈">
+            <span className="brand-mark" aria-hidden="true">H</span>
+            <span className="brand-copy">
+              <strong>한서메이트</strong>
+              <small>관리자</small>
+            </span>
+          </Link>
+          <button
+            className="sidebar-close"
+            type="button"
+            aria-label="메뉴 닫기"
+            onClick={() => setMenuOpen(false)}
+          >
+            <X size={20} aria-hidden="true" />
+          </button>
         </div>
 
         <nav className="sidebar-nav" aria-label="관리자 메뉴">
           {navigation.map((group) => (
             <div className="nav-group" key={group.label}>
               <p>{group.label}</p>
-              {group.items.map((item) => (
-                <Link
-                  className={`nav-link ${isActive(pathname, item.href) ? "active" : ""}`}
-                  href={item.href}
-                  key={item.href}
-                  aria-current={isActive(pathname, item.href) ? "page" : undefined}
-                  onClick={() => setMenuOpen(false)}
-                >
-                  <span>{item.label}</span>
-                </Link>
-              ))}
+              <div className="nav-group-items">
+                {group.items.map((item) => {
+                  const active = isItemActive(pathname, item);
+                  const Icon = item.icon;
+                  return (
+                    <Link
+                      className={`nav-link ${active ? "active" : ""}`}
+                      href={item.href}
+                      key={item.href}
+                      aria-current={active ? "page" : undefined}
+                      onClick={() => setMenuOpen(false)}
+                    >
+                      <Icon size={18} weight="regular" aria-hidden="true" />
+                      <span>{item.label}</span>
+                      {active && <CaretRight className="nav-active-arrow" size={14} aria-hidden="true" />}
+                    </Link>
+                  );
+                })}
+              </div>
             </div>
           ))}
         </nav>
 
+        <div className="sidebar-footer">
+          <ShieldCheck size={17} aria-hidden="true" />
+          <span>관리자 전용 운영 콘솔</span>
+        </div>
       </aside>
 
       <div className="admin-main">
@@ -146,34 +328,51 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               aria-controls="admin-sidebar"
               onClick={() => setMenuOpen(true)}
             >
-              <span />
-              <span />
-              <span />
+              <List size={21} aria-hidden="true" />
             </button>
             <div>
+              <div className="topbar-breadcrumb">
+                <span>{currentPage.section}</span>
+                <CaretRight size={12} aria-hidden="true" />
+                <span aria-current="page">{currentPage.title}</span>
+              </div>
               <h1>{currentPage.title}</h1>
               <p>{currentPage.description}</p>
             </div>
           </div>
 
-          <div className="topbar-account">
-            {!sessionChecked ? (
-              <span className="topbar-account-status">로그인 확인 중...</span>
-            ) : adminSession ? (
-              <>
-                <div className="topbar-account-copy">
-                  <span>로그인한 계정</span>
-                  <strong>{adminSession.loginId}</strong>
-                </div>
-                <button className="button button-secondary" type="button" onClick={handleLogout}>
-                  로그아웃
-                </button>
-              </>
-            ) : pathname !== "/login" ? (
-              <Link className="button button-primary" href={`/login?returnTo=${encodeURIComponent(pathname)}`}>
-                로그인
+          <div className="topbar-actions">
+            {currentPage.action && (
+              <Link className="button button-primary topbar-primary-action" href={currentPage.action.href}>
+                <Plus size={17} weight="bold" aria-hidden="true" />
+                {currentPage.action.label}
               </Link>
-            ) : null}
+            )}
+            <div className="topbar-account">
+              {!sessionChecked ? (
+                <span className="topbar-account-status">로그인 확인 중</span>
+              ) : adminSession ? (
+                <>
+                  <div className="topbar-account-copy">
+                    <span>관리자 계정</span>
+                    <strong>{adminSession.loginId}</strong>
+                  </div>
+                  <button
+                    className="icon-button"
+                    type="button"
+                    onClick={handleLogout}
+                    aria-label="로그아웃"
+                    title="로그아웃"
+                  >
+                    <SignOut size={19} aria-hidden="true" />
+                  </button>
+                </>
+              ) : (
+                <Link className="button button-secondary" href={`/login?returnTo=${encodeURIComponent(pathname)}`}>
+                  로그인
+                </Link>
+              )}
+            </div>
           </div>
         </header>
 

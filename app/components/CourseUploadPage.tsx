@@ -1,11 +1,22 @@
 "use client";
 
+import {
+  ArrowLeft,
+  ArrowRight,
+  Check,
+  FileXls,
+  Info,
+  UploadSimple,
+  WarningCircle,
+  X,
+} from "@phosphor-icons/react";
 import Link from "next/link";
 import {
   type ChangeEvent,
   type DragEvent,
   type KeyboardEvent,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -14,59 +25,124 @@ import {
   apiFetch,
   assertBrowserApiAccess,
 } from "../lib/api";
+import {
+  type CourseUploadKind,
+  type CourseUploadResult,
+  getCourseUploadIssues,
+  parseCourseUploadResponse,
+} from "../lib/course-uploads";
 import { AdminLoginNotice } from "./AdminLoginNotice";
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
 const UPLOAD_TIMEOUT_MS = 150_000;
 const ALLOWED_EXTENSIONS = [".xlsx", ".xlsm"] as const;
 
-type CourseKind = "major" | "general";
 type ResultKind = "stored" | "duplicate" | "review" | "attention";
-
-type UploadReviewIssue = {
-  severity: "WARNING" | "ERROR" | string;
-  code: string;
-  message: string;
-  sheetName: string | null;
-  rowNumber: number | null;
-  field: string | null;
-  rawValue: string | null;
-};
-
-type UploadResponse = {
-  importId: string;
-  storageStatus: "STORED" | "DUPLICATE" | "REVIEW_REQUIRED" | string;
-  databaseChanged: boolean;
-  offeringCount: number;
-  message: string;
-  reviewIssues: UploadReviewIssue[];
-};
 
 type UploadErrorState = {
   title: string;
   message: string;
+  details?: string[];
+  accessDenied?: boolean;
 };
 
 type CourseUploadPageProps = {
-  kind: CourseKind;
+  kind: CourseUploadKind;
 };
 
 const courseConfig = {
   major: {
     label: "전공",
+    navLabel: "전공 시간표",
+    href: "/courses/major",
     endpoint: "/api/v1/timetables/major",
     eyebrow: "전공 시간표",
+    heading: "전공 시간표 파일 업로드",
     description: "학과·전공, 학년, 분반, 담당 교수와 강의시간을 한 번에 확인해 등록합니다.",
     fileHint: "전공 강의시간표 엑셀 파일",
+    submitLabel: "전공 시간표 반영하기",
+    progressTitle: "엑셀 파일에서 강의 정보를 확인하고 있습니다.",
+    progressDescription: "파일 확인과 강좌 정보 반영을 순서대로 진행합니다.",
+    guideTitle: "전공 원본 확인",
+    guideDescription: "전공 시간표 파일이 맞는지 확인해 주세요. 교양 파일은 처리되지 않습니다.",
+    periodTitle: "학년도·학기 확인",
+    periodDescription: "파일 안에 서로 다른 학기 정보가 섞이지 않았는지 확인해 주세요.",
   },
   general: {
     label: "교양",
+    navLabel: "교양 시간표",
+    href: "/courses/general",
     endpoint: "/api/v1/timetables/general-education",
     eyebrow: "교양 시간표",
+    heading: "교양 시간표 파일 업로드",
     description: "교양 영역과 세부 분류, 운영기관, 강의시간을 학기별로 확인해 등록합니다.",
     fileHint: "교양 강의시간표 엑셀 파일",
+    submitLabel: "교양 시간표 반영하기",
+    progressTitle: "엑셀 파일에서 강의 정보를 확인하고 있습니다.",
+    progressDescription: "파일 확인과 강좌 정보 반영을 순서대로 진행합니다.",
+    guideTitle: "교양 원본 확인",
+    guideDescription: "교양 시간표 파일이 맞는지 확인해 주세요. 전공 파일은 처리되지 않습니다.",
+    periodTitle: "학년도·학기 확인",
+    periodDescription: "파일 안에 서로 다른 학기 정보가 섞이지 않았는지 확인해 주세요.",
   },
-} as const;
+  equivalent: {
+    label: "동일교과목",
+    navLabel: "동일교과목",
+    href: "/courses/equivalent",
+    endpoint: "/api/admin/course-enrichments/equivalent-courses/imports",
+    eyebrow: "동일교과목 자료",
+    heading: "동일교과목 파일 업로드",
+    description: "같은 과목으로 인정되는 과목코드와 그룹을 학기별로 확인해 반영합니다.",
+    fileHint: "동일교과목 현황 엑셀 파일",
+    submitLabel: "동일교과목 반영하기",
+    progressTitle: "엑셀 파일에서 동일교과목 그룹을 확인하고 있습니다.",
+    progressDescription: "일련번호와 과목코드를 확인한 뒤 자료를 반영합니다.",
+    guideTitle: "일련번호·과목코드 확인",
+    guideDescription: "A열 일련번호, C열 7자리 과목코드, D열 과목명이 있는 파일인지 확인해 주세요.",
+    periodTitle: "학년도·학기 표기 확인",
+    periodDescription: "파일명, 시트명 또는 파일 안에 학년도와 학기가 적혀 있어야 합니다.",
+  },
+  crossMajor: {
+    label: "타학과 전공인정",
+    navLabel: "타학과 전공인정",
+    href: "/courses/cross-major",
+    endpoint: "/api/admin/course-enrichments/cross-major-recognitions/imports",
+    eyebrow: "전공인정 자료",
+    heading: "타학과 전공인정 파일 업로드",
+    description: "다른 학과에서 수강해도 전공으로 인정되는 교과목 규칙을 연도별로 반영합니다.",
+    fileHint: "타학과 전공인정 교과목 목록 엑셀 파일",
+    submitLabel: "전공인정 자료 반영하기",
+    progressTitle: "엑셀 파일에서 전공인정 규칙을 확인하고 있습니다.",
+    progressDescription: "필수 항목과 적용연도를 확인한 뒤 자료를 반영합니다.",
+    guideTitle: "필수 항목 확인",
+    guideDescription: "학생 소속, 개설 소속, 과목코드, 과목명, 적용년도와 학기가 모두 있는지 확인해 주세요.",
+    periodTitle: "정책연도·학기 표기 확인",
+    periodDescription: "파일명, 문서 제목 또는 시트명에 정책연도와 업로드 학기가 적혀 있어야 합니다.",
+  },
+} as const satisfies Record<CourseUploadKind, {
+  label: string;
+  navLabel: string;
+  href: string;
+  endpoint: string;
+  eyebrow: string;
+  heading: string;
+  description: string;
+  fileHint: string;
+  submitLabel: string;
+  progressTitle: string;
+  progressDescription: string;
+  guideTitle: string;
+  guideDescription: string;
+  periodTitle: string;
+  periodDescription: string;
+}>;
+
+const courseKinds: CourseUploadKind[] = [
+  "major",
+  "general",
+  "equivalent",
+  "crossMajor",
+];
 
 function validateFile(file: File): string | null {
   const lowerName = file.name.toLowerCase();
@@ -100,7 +176,7 @@ function formatNumber(value: number | null | undefined) {
 
 function formatProcessingResult(resultKind: ResultKind) {
   if (resultKind === "stored") return "저장 완료";
-  if (resultKind === "duplicate") return "이미 반영된 파일";
+  if (resultKind === "duplicate") return "이미 반영됨";
   if (resultKind === "review") return "검토 필요";
   return "다시 확인 필요";
 }
@@ -108,9 +184,9 @@ function formatProcessingResult(resultKind: ResultKind) {
 const reviewFieldLabels: Record<string, string> = {
   academicYear: "학년도",
   semester: "학기",
-  courseCode: "학수번호",
+  courseCode: "과목코드",
   courseName: "과목명",
-  subjectCode: "학수번호",
+  subjectCode: "과목코드",
   subjectName: "과목명",
   department: "학과",
   grade: "학년",
@@ -123,6 +199,13 @@ const reviewFieldLabels: Record<string, string> = {
   classTime: "강의 시간",
   period: "교시",
   category: "교양 영역",
+  sourceSerial: "일련번호",
+  studentDepartment: "학생 학과",
+  studentMajor: "학생 전공",
+  openedDepartment: "개설 학과",
+  openedMajor: "개설 전공",
+  policyYear: "적용년도",
+  uploadedSemester: "적용학기",
 };
 
 function formatReviewField(field: string | null) {
@@ -132,7 +215,7 @@ function formatReviewField(field: string | null) {
   return /[가-힣]/.test(normalized) ? normalized : "파일 내용";
 }
 
-function classifyResult(result: UploadResponse): ResultKind {
+function classifyResult(result: CourseUploadResult): ResultKind {
   if (result.storageStatus === "DUPLICATE" && result.databaseChanged === false) {
     return "duplicate";
   }
@@ -154,6 +237,23 @@ function classifyResult(result: UploadResponse): ResultKind {
   return "attention";
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function getErrorPayload(payload: unknown) {
+  if (!isRecord(payload)) return {};
+  const details = Array.isArray(payload.details)
+    ? payload.details.filter((item): item is string => typeof item === "string")
+    : typeof payload.details === "string"
+      ? [payload.details]
+      : [];
+  return {
+    message: typeof payload.message === "string" ? payload.message : undefined,
+    details,
+  };
+}
+
 function normalizeUploadError(error: unknown, timedOut: boolean): UploadErrorState {
   if (timedOut) {
     return {
@@ -163,9 +263,16 @@ function normalizeUploadError(error: unknown, timedOut: boolean): UploadErrorSta
   }
 
   if (error instanceof ApiError) {
+    const payload = getErrorPayload(error.payload);
     return {
-      title: "파일을 처리하지 못했습니다.",
-      message: error.message,
+      title: error.status === 403
+        ? "관리자 권한이 필요합니다."
+        : error.status === 422
+          ? "파일 내용을 판별하지 못했습니다."
+          : "파일을 처리하지 못했습니다.",
+      message: payload.message || error.message,
+      details: error.status === 422 ? payload.details : undefined,
+      accessDenied: error.status === 403,
     };
   }
 
@@ -175,48 +282,100 @@ function normalizeUploadError(error: unknown, timedOut: boolean): UploadErrorSta
   };
 }
 
+function getResultMetrics(result: CourseUploadResult) {
+  if (result.kind === "equivalent") {
+    return [
+      { label: "동일교과목 그룹", value: `${formatNumber(result.groupCount)}개` },
+      { label: "전체 과목", value: `${formatNumber(result.memberCount)}개` },
+    ];
+  }
+
+  if (result.kind === "crossMajor") {
+    return [
+      { label: "정책연도", value: `${formatNumber(result.policyYear)}학년도` },
+      { label: "업로드 학기", value: `${formatNumber(result.uploadedSemester)}학기` },
+      { label: "반영된 규칙", value: `${formatNumber(result.ruleCount)}개` },
+    ];
+  }
+
+  return [
+    { label: "반영된 강좌", value: `${formatNumber(result.offeringCount)}개` },
+  ];
+}
+
+function getResultCopy(result: CourseUploadResult, resultKind: ResultKind) {
+  if (resultKind === "stored") {
+    if (result.kind === "equivalent") {
+      return {
+        eyebrow: "저장 완료",
+        title: "동일교과목을 저장했습니다.",
+        description: `${formatNumber(result.groupCount)}개 그룹, ${formatNumber(result.memberCount)}개 과목이 반영되었습니다.`,
+      };
+    }
+    if (result.kind === "crossMajor") {
+      return {
+        eyebrow: "저장 완료",
+        title: `${formatNumber(result.policyYear)}학년도 타학과 전공인정 자료를 저장했습니다.`,
+        description: `${formatNumber(result.ruleCount)}개 규칙이 반영되었습니다.`,
+      };
+    }
+    return {
+      eyebrow: "저장 완료",
+      title: `${courseConfig[result.kind].label} 시간표를 저장했습니다.`,
+      description: `${formatNumber(result.offeringCount)}개 개설 강좌가 반영되었습니다.`,
+    };
+  }
+
+  if (resultKind === "duplicate") {
+    return {
+      eyebrow: "이미 반영됨",
+      title: result.kind === "equivalent"
+        ? "이미 같은 동일교과목 자료가 반영되어 있습니다."
+        : result.kind === "crossMajor"
+          ? "이미 같은 연도의 전공인정 자료가 반영되어 있습니다."
+          : "이 파일은 이미 시간표에 반영되어 있습니다.",
+      description: "자료를 다시 저장하지 않았습니다. 다른 파일을 선택해 주세요.",
+    };
+  }
+
+  if (resultKind === "review") {
+    return {
+      eyebrow: "검토 필요",
+      title: "엑셀 파일에서 확인이 필요한 항목이 있습니다.",
+      description: "기존 자료는 그대로 유지되었습니다. 아래 내용을 고친 뒤 다시 올려 주세요.",
+    };
+  }
+
+  return {
+    eyebrow: "다시 확인 필요",
+    title: "파일 처리를 완료하지 못했습니다.",
+    description: "아래 내용을 확인한 뒤 같은 파일로 다시 시도해 주세요.",
+  };
+}
+
 function ResultSummary({
   result,
-  kind,
   selectedFileName,
   onReset,
   onRetry,
 }: {
-  result: UploadResponse;
-  kind: CourseKind;
+  result: CourseUploadResult;
   selectedFileName: string;
   onReset: () => void;
   onRetry: () => void;
 }) {
-  const config = courseConfig[kind];
+  const config = courseConfig[result.kind];
   const resultKind = classifyResult(result);
-  const issues = Array.isArray(result.reviewIssues) ? result.reviewIssues : [];
-  const resultCopy = {
-    stored: {
-      symbol: "✓",
-      eyebrow: "저장 완료",
-      title: `${config.label} 시간표를 저장했습니다.`,
-      description: `${formatNumber(result.offeringCount)}개 개설 강좌가 반영되었습니다.`,
-    },
-    duplicate: {
-      symbol: "=",
-      eyebrow: "이미 반영된 파일",
-      title: "이 파일은 이미 시간표에 반영되어 있습니다.",
-      description: "중복으로 저장하지 않았습니다. 다른 파일을 선택해 주세요.",
-    },
-    review: {
-      symbol: "!",
-      eyebrow: "검토 필요",
-      title: "엑셀 파일에서 확인이 필요한 항목이 있습니다.",
-      description: "아래 내용을 고친 뒤 수정한 파일을 다시 올려 주세요.",
-    },
-    attention: {
-      symbol: "?",
-      eyebrow: "다시 확인 필요",
-      title: "파일 처리를 완료하지 못했습니다.",
-      description: "아래 내용을 확인한 뒤 같은 파일로 다시 시도해 주세요.",
-    },
-  }[resultKind];
+  const issues = getCourseUploadIssues(result);
+  const metrics = getResultMetrics(result);
+  const [issuePage, setIssuePage] = useState(0);
+  const issuePageSize = 25;
+  const issuePageCount = Math.ceil(issues.length / issuePageSize);
+  const visibleIssues = useMemo(
+    () => issues.slice(issuePage * issuePageSize, (issuePage + 1) * issuePageSize),
+    [issuePage, issues],
+  );
+  const resultCopy = getResultCopy(result, resultKind);
 
   return (
     <div className="course-result-stack">
@@ -226,7 +385,9 @@ function ResultSummary({
         role="status"
         aria-live="polite"
       >
-        <div className="result-symbol" aria-hidden="true">{resultCopy.symbol}</div>
+        <div className="result-symbol" aria-hidden="true">
+          {resultKind === "stored" ? <Check size={24} weight="bold" /> : <WarningCircle size={24} />}
+        </div>
         <div className="result-copy">
           <span className="eyebrow dark">{resultCopy.eyebrow}</span>
           <h2 id="course-result-title">{resultCopy.title}</h2>
@@ -255,9 +416,11 @@ function ResultSummary({
           </div>
           <dl className="course-meta-list">
             <div><dt>선택한 파일</dt><dd>{selectedFileName}</dd></div>
-            <div><dt>시간표 구분</dt><dd>{config.label}</dd></div>
+            <div><dt>자료 구분</dt><dd>{config.navLabel}</dd></div>
             <div><dt>처리 결과</dt><dd>{formatProcessingResult(resultKind)}</dd></div>
-            <div><dt>반영된 강좌</dt><dd>{formatNumber(result.offeringCount)}개</dd></div>
+            {metrics.map((metric) => (
+              <div key={metric.label}><dt>{metric.label}</dt><dd>{metric.value}</dd></div>
+            ))}
           </dl>
         </section>
 
@@ -269,10 +432,10 @@ function ResultSummary({
             </div>
           </div>
           <div className="empty-issues" role="status">
-            <span aria-hidden="true">i</span>
+            <span aria-hidden="true"><Info size={18} /></span>
             <div>
               <strong>{formatProcessingResult(resultKind)}</strong>
-              <p>{resultCopy.description}</p>
+              <p>{result.message || resultCopy.description}</p>
             </div>
           </div>
         </section>
@@ -282,16 +445,24 @@ function ResultSummary({
         <section className="panel course-issues-panel" aria-labelledby="issues-title">
           <div className="panel-heading panel-heading-border issues-heading">
             <div>
-              <span className="eyebrow dark">검토 필요</span>
+              <span className="eyebrow dark">
+                {resultKind === "review" ? "수정 필요" : "확인 권장"}
+              </span>
               <h2 id="issues-title">확인할 내용</h2>
-              <p>표에 적힌 시트와 행을 찾아 내용을 확인해 주세요.</p>
+              <p>
+                {resultKind === "review"
+                  ? "표에 적힌 시트와 행을 수정한 뒤 파일을 다시 올려 주세요."
+                  : resultKind === "stored"
+                    ? "자료는 반영되었습니다. 표에 적힌 내용을 함께 확인해 주세요."
+                    : "이미 반영된 자료입니다. 표에 적힌 내용을 함께 확인해 주세요."}
+              </p>
             </div>
             <span className="issue-count">{formatNumber(issues.length)}건</span>
           </div>
 
           {issues.length === 0 ? (
             <div className="empty-issues" role="status">
-              <span aria-hidden="true">i</span>
+              <span aria-hidden="true"><Info size={18} /></span>
               <div>
                 <strong>확인할 위치가 표시되지 않았습니다.</strong>
                 <p>안내 내용을 확인한 뒤 파일을 다시 올려 주세요.</p>
@@ -304,17 +475,17 @@ function ResultSummary({
                 <thead>
                   <tr>
                     <th scope="col">구분</th>
-                    <th scope="col">파일 위치</th>
+                    <th scope="col">확인 위치</th>
                     <th scope="col">확인 항목</th>
-                    <th scope="col">문제 내용</th>
-                    <th scope="col">원본 값</th>
+                    <th scope="col">안내</th>
+                    <th scope="col">입력된 값</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {issues.map((issue, index) => {
+                  {visibleIssues.map((issue, index) => {
                     const severity = issue.severity === "ERROR" ? "error" : "warning";
                     return (
-                      <tr key={`${issue.sheetName}-${issue.rowNumber}-${index}`}>
+                      <tr key={`${issue.code}-${issue.sheetName}-${issue.rowNumber}-${issuePage * issuePageSize + index}`}>
                         <td>
                           <span className={`issue-severity issue-${severity}`}>
                             {issue.severity === "ERROR" ? "수정 필요" : "확인 권장"}
@@ -322,11 +493,7 @@ function ResultSummary({
                         </td>
                         <td>
                           <strong>{issue.sheetName || "시트 정보 없음"}</strong>
-                          <span>
-                            {typeof issue.rowNumber === "number"
-                              ? `${issue.rowNumber}행`
-                              : "행 정보 없음"}
-                          </span>
+                          {typeof issue.rowNumber === "number" && <span> · {issue.rowNumber}행</span>}
                         </td>
                         <td><span>{formatReviewField(issue.field)}</span></td>
                         <td><span>{issue.message || "이 항목을 확인해 주세요."}</span></td>
@@ -337,6 +504,20 @@ function ResultSummary({
                 </tbody>
               </table>
             </div>
+          )}
+          {issuePageCount > 1 && (
+            <nav className="issues-pagination" aria-label="검토 항목 페이지">
+              <span>전체 {formatNumber(issues.length)}건 중 {issuePage * issuePageSize + 1}-{Math.min((issuePage + 1) * issuePageSize, issues.length)}건</span>
+              <div>
+                <button type="button" onClick={() => setIssuePage((page) => Math.max(0, page - 1))} disabled={issuePage === 0}>
+                  <ArrowLeft size={15} aria-hidden="true" /> 이전
+                </button>
+                <strong>{issuePage + 1} / {issuePageCount}</strong>
+                <button type="button" onClick={() => setIssuePage((page) => Math.min(issuePageCount - 1, page + 1))} disabled={issuePage + 1 >= issuePageCount}>
+                  다음 <ArrowRight size={15} aria-hidden="true" />
+                </button>
+              </div>
+            </nav>
           )}
         </section>
       )}
@@ -353,7 +534,7 @@ export function CourseUploadPage({ kind }: CourseUploadPageProps) {
   const [uploading, setUploading] = useState(false);
   const [validationMessage, setValidationMessage] = useState<string | null>(null);
   const [uploadError, setUploadError] = useState<UploadErrorState | null>(null);
-  const [result, setResult] = useState<UploadResponse | null>(null);
+  const [result, setResult] = useState<CourseUploadResult | null>(null);
 
   useEffect(() => {
     return () => activeController.current?.abort();
@@ -454,12 +635,12 @@ export function CourseUploadPage({ kind }: CourseUploadPageProps) {
       assertBrowserApiAccess();
       const body = new FormData();
       body.append("file", file, file.name);
-      const response = await apiFetch<UploadResponse>(config.endpoint, {
+      const response = await apiFetch<unknown>(config.endpoint, {
         method: "POST",
         body,
         signal: controller.signal,
       });
-      setResult(response);
+      setResult(parseCourseUploadResponse(kind, response));
     } catch (error) {
       setUploadError(normalizeUploadError(error, timedOut));
     } finally {
@@ -470,30 +651,29 @@ export function CourseUploadPage({ kind }: CourseUploadPageProps) {
   }
 
   return (
-    <AdminLoginNotice returnTo={kind === "major" ? "/courses/major" : "/courses/general"}>
+    <AdminLoginNotice returnTo={config.href}>
       <div className="stack-lg course-upload-page">
       <section className="course-upload-layout">
         <div className="panel course-upload-panel" aria-busy={uploading}>
           <div className="panel-heading panel-heading-border course-upload-heading">
             <div>
               <span className="eyebrow dark">{config.eyebrow}</span>
-              <h2>{config.label} 시간표 파일 업로드</h2>
+              <h2>{config.heading}</h2>
               <p>{config.description}</p>
-              <nav className="course-type-switch" aria-label="시간표 유형 선택">
-                <Link
-                  className={`course-type-switch-link ${kind === "major" ? "is-active" : ""}`}
-                  href="/courses/major"
-                  aria-current={kind === "major" ? "page" : undefined}
-                >
-                  전공 시간표
-                </Link>
-                <Link
-                  className={`course-type-switch-link ${kind === "general" ? "is-active" : ""}`}
-                  href="/courses/general"
-                  aria-current={kind === "general" ? "page" : undefined}
-                >
-                  교양 시간표
-                </Link>
+              <nav className="course-type-switch" aria-label="학사 자료 유형 선택">
+                {courseKinds.map((itemKind) => {
+                  const item = courseConfig[itemKind];
+                  return (
+                    <Link
+                      className={`course-type-switch-link ${kind === itemKind ? "is-active" : ""}`}
+                      href={item.href}
+                      aria-current={kind === itemKind ? "page" : undefined}
+                      key={itemKind}
+                    >
+                      {item.navLabel}
+                    </Link>
+                  );
+                })}
               </nav>
             </div>
             <span className="file-limit-badge">최대 10MB</span>
@@ -523,7 +703,7 @@ export function CourseUploadPage({ kind }: CourseUploadPageProps) {
               onChange={handleInputChange}
             />
             <div className="drop-zone-icon" aria-hidden="true">
-              <span>엑셀</span>
+              <FileXls size={28} weight="regular" />
             </div>
             <div className="drop-zone-copy">
               <strong>{dragging ? "여기에 파일을 놓아 주세요" : "엑셀 파일을 끌어 놓거나 클릭해 선택하세요"}</strong>
@@ -545,7 +725,7 @@ export function CourseUploadPage({ kind }: CourseUploadPageProps) {
           <div aria-live="polite" aria-atomic="true">
             {validationMessage && (
               <div className="inline-validation" role="alert">
-                <span aria-hidden="true">!</span>
+                <span aria-hidden="true"><WarningCircle size={18} weight="fill" /></span>
                 <p>{validationMessage}</p>
               </div>
             )}
@@ -566,7 +746,7 @@ export function CourseUploadPage({ kind }: CourseUploadPageProps) {
                   disabled={uploading}
                   onClick={resetUpload}
                 >
-                  ×
+                  <X size={17} aria-hidden="true" />
                 </button>
               </div>
             )}
@@ -576,8 +756,8 @@ export function CourseUploadPage({ kind }: CourseUploadPageProps) {
             <div className="course-upload-progress" role="status" aria-live="polite">
               <div className="upload-spinner" aria-hidden="true" />
               <div>
-                <strong>엑셀 파일에서 강의 정보를 확인하고 있습니다.</strong>
-                <p>창을 닫지 말아 주세요. 완료까지 최대 2분 30초가 걸릴 수 있습니다.</p>
+                <strong>{config.progressTitle}</strong>
+                <p>{config.progressDescription}</p>
               </div>
               <div className="indeterminate-track" aria-hidden="true"><span /></div>
             </div>
@@ -585,20 +765,29 @@ export function CourseUploadPage({ kind }: CourseUploadPageProps) {
 
           {uploadError && (
             <div className="course-upload-error" role="alert">
-              <div className="error-symbol" aria-hidden="true">!</div>
+              <div className="error-symbol" aria-hidden="true"><WarningCircle size={19} weight="fill" /></div>
               <div className="error-copy">
                 <div className="error-title-line">
                   <strong>{uploadError.title}</strong>
                 </div>
                 <p>{uploadError.message}</p>
+                {(uploadError.details?.length ?? 0) > 0 && (
+                  <div className="upload-error-details">
+                    {uploadError.details && uploadError.details.length > 0 && (
+                      <ul>{uploadError.details.map((detail, index) => <li key={`${detail}-${index}`}>{detail}</li>)}</ul>
+                    )}
+                  </div>
+                )}
               </div>
               <div className="error-actions">
                 <button className="button button-secondary" type="button" onClick={resetUpload}>
                   초기화
                 </button>
-                <button className="button button-primary" type="button" onClick={uploadFile}>
-                  다시 시도
-                </button>
+                {!uploadError.accessDenied && (
+                  <button className="button button-primary" type="button" onClick={uploadFile}>
+                    다시 시도
+                  </button>
+                )}
               </div>
             </div>
           )}
@@ -610,7 +799,7 @@ export function CourseUploadPage({ kind }: CourseUploadPageProps) {
               disabled={!file || uploading}
               onClick={uploadFile}
             >
-              {uploading ? "처리 중..." : `${config.label} 시간표 반영하기`}
+              {uploading ? "처리 중..." : config.submitLabel}
             </button>
           </div>
         </div>
@@ -620,29 +809,29 @@ export function CourseUploadPage({ kind }: CourseUploadPageProps) {
           <h2 id="upload-guide-title">업로드 전 확인</h2>
           <ol className="upload-guide-list">
             <li>
-              <span>01</span>
+              <FileXls size={20} aria-hidden="true" />
               <div>
-                <strong>{config.label} 원본 확인</strong>
-                <p>{config.label} 시간표 파일이 맞는지 확인해 주세요. 다른 유형의 파일은 처리할 수 없습니다.</p>
+                <strong>{config.guideTitle}</strong>
+                <p>{config.guideDescription}</p>
               </div>
             </li>
             <li>
-              <span>02</span>
+              <Info size={20} aria-hidden="true" />
               <div>
-                <strong>학년도·학기 확인</strong>
-                <p>파일 안에 서로 다른 학기 정보가 섞이지 않았는지 확인해 주세요.</p>
+                <strong>{config.periodTitle}</strong>
+                <p>{config.periodDescription}</p>
               </div>
             </li>
             <li>
-              <span>03</span>
+              <UploadSimple size={20} aria-hidden="true" />
               <div>
                 <strong>결과까지 기다리기</strong>
-                <p>파일 확인과 강의 정보 반영이 한 번에 진행됩니다.</p>
+                <p>파일 확인과 자료 반영이 한 번에 진행됩니다.</p>
               </div>
             </li>
           </ol>
           <div className="upload-guide-note">
-            <span aria-hidden="true">i</span>
+            <span aria-hidden="true"><Info size={18} /></span>
             <p>확인 권장 항목은 등록을 막지 않지만, 수정 필요 항목이 하나라도 있으면 전체 내용이 반영되지 않습니다.</p>
           </div>
         </aside>
@@ -651,7 +840,6 @@ export function CourseUploadPage({ kind }: CourseUploadPageProps) {
       {result && (
         <ResultSummary
           result={result}
-          kind={kind}
           selectedFileName={file?.name || "선택한 엑셀 파일"}
           onReset={resetUpload}
           onRetry={uploadFile}

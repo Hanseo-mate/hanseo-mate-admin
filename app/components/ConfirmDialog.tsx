@@ -1,5 +1,6 @@
 "use client";
 
+import { Question, Warning } from "@phosphor-icons/react";
 import { useEffect, useRef } from "react";
 
 type ConfirmDialogProps = {
@@ -43,6 +44,8 @@ export function ConfirmDialog({
     previousFocusRef.current = document.activeElement instanceof HTMLElement
       ? document.activeElement
       : null;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
     const animationFrameId = window.requestAnimationFrame(() => {
       cancelButtonRef.current?.focus();
     });
@@ -85,6 +88,7 @@ export function ConfirmDialog({
     return () => {
       window.cancelAnimationFrame(animationFrameId);
       document.removeEventListener("keydown", handleKeyDown);
+      document.body.style.overflow = previousOverflow;
       const previousFocus = previousFocusRef.current;
       previousFocusRef.current = null;
       if (previousFocus?.isConnected) previousFocus.focus();
@@ -113,7 +117,7 @@ export function ConfirmDialog({
         onMouseDown={(event) => event.stopPropagation()}
       >
         <div className={`modal-icon ${danger ? "danger" : "warning"}`} aria-hidden="true">
-          {danger ? "!" : "?"}
+          {danger ? <Warning size={22} weight="fill" /> : <Question size={22} weight="fill" />}
         </div>
         <h2 id="confirm-dialog-title">{title}</h2>
         <p id="confirm-dialog-description">{description}</p>

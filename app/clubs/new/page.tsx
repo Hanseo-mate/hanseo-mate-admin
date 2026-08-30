@@ -1,8 +1,10 @@
 "use client";
 
+import { Check, CheckCircle, ImageSquare, NotePencil } from "@phosphor-icons/react";
 import Link from "next/link";
 import { type FormEvent, useRef, useState } from "react";
 import { AdminLoginNotice } from "../../components/AdminLoginNotice";
+import { UnsavedChangesDialog } from "../../components/UnsavedChangesDialog";
 import { getAdminSession } from "../../lib/auth";
 import { apiFetch, getErrorText } from "../../lib/api";
 import { clubCategories } from "../../lib/clubs";
@@ -57,6 +59,7 @@ export default function NewClubPage() {
 
   return (
     <AdminLoginNotice returnTo="/clubs/new">
+      <UnsavedChangesDialog dirty={createdId === null && Boolean(name || category)} />
       <div className="form-page-grid club-create-grid">
         <section className="panel form-panel">
         <div className="panel-heading panel-heading-border">
@@ -76,7 +79,7 @@ export default function NewClubPage() {
 
         {createdId !== null ? (
           <div className="creation-success" role="status">
-            <div className="success-check" aria-hidden="true">✓</div>
+            <div className="success-check" aria-hidden="true"><CheckCircle size={24} weight="fill" /></div>
             <div>
               <span>등록 완료</span>
               <h3>기본 정보가 저장되었습니다.</h3>
@@ -127,6 +130,7 @@ export default function NewClubPage() {
           </fieldset>
 
           <div className="form-actions form-actions-end">
+            <Link className="button button-secondary" href="/clubs/manage">취소</Link>
             <button className="button button-primary" type="submit" disabled={busy}>
               {busy ? "저장 중..." : "기본 정보 저장하고 다음"}
             </button>
@@ -139,9 +143,9 @@ export default function NewClubPage() {
         <span className="eyebrow">등록 안내</span>
         <h2>등록 순서</h2>
         <ol>
-          <li className="active"><span>01</span><div><strong>기본 정보</strong><small>이름과 분과 등록</small></div></li>
-          <li><span>02</span><div><strong>소개·활동 정보</strong><small>한 줄 소개와 긴 글, 모집 내용 작성</small></div></li>
-          <li><span>03</span><div><strong>대표·배경 사진</strong><small>각 5MB 이하 사진 등록</small></div></li>
+          <li className="active"><span><Check size={17} weight="bold" /></span><div><strong>기본 정보</strong><small>이름과 분과 등록</small></div></li>
+          <li><span><NotePencil size={17} /></span><div><strong>소개와 활동 정보</strong><small>한 줄 소개와 모집 내용 작성</small></div></li>
+          <li><span><ImageSquare size={17} /></span><div><strong>대표와 배경 사진</strong><small>각 5MB 이하 사진 등록</small></div></li>
         </ol>
         <p>분과는 동아리를 등록한 뒤에는 바꿀 수 없습니다. 선택한 분과가 맞는지 꼭 확인해 주세요.</p>
         </aside>

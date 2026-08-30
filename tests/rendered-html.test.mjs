@@ -5,17 +5,29 @@ import test from "node:test";
 const root = new URL("../", import.meta.url);
 
 const exportedPages = [
-  { path: "out/index.html", text: "빠른 작업" },
-  { path: "out/posters/manage/index.html", text: "포스터 관리" },
+  { path: "out/index.html", text: "운영 대시보드" },
+  { path: "out/posters/manage/index.html", text: "홈 포스터" },
   { path: "out/notices/new/index.html", text: "공지 등록" },
-  { path: "out/notices/manage/index.html", text: "공지 수정·삭제" },
-  { path: "out/calendars/manage/index.html", text: "학생회 일정 관리" },
+  { path: "out/notices/manage/index.html", text: "학생회 공지" },
+  { path: "out/system-notices/manage/index.html", text: "시스템 공지" },
+  { path: "out/calendars/manage/index.html", text: "학생회 일정" },
+  { path: "out/bus-schedules/manage/index.html", text: "버스 시간표" },
+  { path: "out/campus-map/manage/index.html", text: "캠퍼스맵" },
   { path: "out/clubs/new/index.html", text: "동아리 등록" },
-  { path: "out/clubs/manage/index.html", text: "동아리 조회·수정" },
+  { path: "out/clubs/manage/index.html", text: "동아리 관리" },
   { path: "out/login/index.html", text: "관리자 로그인" },
-  { path: "out/courses/major/index.html", text: "전공 시간표 파일 업로드" },
-  { path: "out/courses/general/index.html", text: "교양 시간표 파일 업로드" },
+  { path: "out/courses/major/index.html", text: "강의시간표 업로드" },
+  { path: "out/courses/general/index.html", text: "강의시간표 업로드" },
+  { path: "out/courses/equivalent/index.html", text: "동일교과목 업로드" },
+  { path: "out/courses/cross-major/index.html", text: "타학과 전공인정 업로드" },
 ];
+
+function visibleDocument(html) {
+  return html
+    .replace(/<script\b[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style\b[\s\S]*?<\/style>/gi, " ")
+    .replace(/<!--.*?-->/gs, " ");
+}
 
 test("exports every requested admin route", async () => {
   for (const page of exportedPages) {
@@ -24,6 +36,29 @@ test("exports every requested admin route", async () => {
     assert.match(visibleTextHtml, /한서메이트/);
     assert.match(visibleTextHtml, new RegExp(page.text));
     assert.doesNotMatch(visibleTextHtml, /codex-preview|Your site is taking shape|SkeletonPreview/);
+  }
+});
+
+test("exports the live operations dashboard instead of the old shortcut-card landing page", async () => {
+  const html = await readFile(new URL("out/index.html", root), "utf8");
+
+  assert.match(html, /운영 대시보드/);
+  assert.doesNotMatch(html, /관리할 업무를 선택하세요|quick-action-grid/);
+});
+
+test("exports the new academic upload pages without developer jargon", async () => {
+  for (const page of [
+    { path: "out/courses/equivalent/index.html", title: "동일교과목 업로드" },
+    { path: "out/courses/cross-major/index.html", title: "타학과 전공인정 업로드" },
+  ]) {
+    const html = await readFile(new URL(page.path, root), "utf8");
+    const visibleHtml = visibleDocument(html);
+    assert.match(visibleHtml, new RegExp(page.title));
+    assert.match(visibleHtml, /로그인 상태를 확인하고 있습니다/);
+    assert.doesNotMatch(
+      visibleHtml,
+      /JWT|Bearer|multipart|Content-Type|storageStatus|databaseChanged|importId|ADMIN 권한|API 주소/,
+    );
   }
 });
 
@@ -36,13 +71,18 @@ test("keeps the club list based editing workflow easy to understand", async () =
 
 test("does not show implementation jargon in staff-facing copy", async () => {
   const sources = await Promise.all([
+    "app/components/AppShell.tsx",
+    "app/page.tsx",
     "app/login/page.tsx",
     "app/components/AdminLoginNotice.tsx",
     "app/components/CourseUploadPage.tsx",
     "app/posters/manage/page.tsx",
     "app/notices/new/page.tsx",
     "app/notices/manage/page.tsx",
+    "app/system-notices/manage/page.tsx",
     "app/calendars/manage/page.tsx",
+    "app/bus-schedules/manage/page.tsx",
+    "app/campus-map/manage/page.tsx",
     "app/clubs/new/page.tsx",
     "app/clubs/manage/page.tsx",
   ].map((path) => readFile(new URL(path, root), "utf8")));

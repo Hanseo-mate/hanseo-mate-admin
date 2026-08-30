@@ -27,7 +27,7 @@ function getRequestFailureMessage(status: number, path: string) {
       : "로그인이 만료되었습니다. 다시 로그인해 주세요.";
   }
   if (status === 403) {
-    return "이 작업을 진행할 권한이 없습니다.";
+    return "관리자 권한이 필요한 작업입니다. 권한이 있는 계정으로 로그인해 주세요.";
   }
   if (status === 404) {
     return "요청한 정보를 찾을 수 없습니다.";
@@ -92,6 +92,13 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise
   if (!response.ok) {
     if (isAdminRequest && response.status === 401) {
       clearAdminSession();
+      if (
+        typeof window !== "undefined" &&
+        !["/login", "/login/"].includes(window.location.pathname)
+      ) {
+        const returnTo = `${window.location.pathname}${window.location.search}`;
+        window.location.replace(`/login/?expired=1&returnTo=${encodeURIComponent(returnTo)}`);
+      }
     }
     throw new ApiError(
       getRequestFailureMessage(response.status, path),

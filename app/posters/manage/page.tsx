@@ -1,18 +1,28 @@
 "use client";
 
 import {
+  ArrowClockwise,
+  CheckCircle,
+  ImageSquare,
+  Plus,
+  Trash,
+  UploadSimple,
+  WarningCircle,
+  X,
+} from "@phosphor-icons/react";
+import {
   type DragEvent,
   type KeyboardEvent,
   useCallback,
   useEffect,
-  useMemo,
   useRef,
   useState,
 } from "react";
 import { AdminLoginNotice } from "../../components/AdminLoginNotice";
-import { ConfirmDialog } from "../../components/ConfirmDialog";
-import { apiFetch, getErrorText } from "../../lib/api";
+import { UnsavedChangesDialog } from "../../components/UnsavedChangesDialog";
+import { ApiError, apiFetch, getErrorText } from "../../lib/api";
 import { ADMIN_SESSION_EVENT, getAdminSession } from "../../lib/auth";
+import styles from "../posters.module.css";
 
 type Poster = {
   id: number;
@@ -96,18 +106,203 @@ function PosterImage({
   imageUrl?: string;
   alt: string;
 }) {
-  const objectUrl = useMemo(() => file ? URL.createObjectURL(file) : "", [file]);
+  const imageRef = useRef<HTMLImageElement | null>(null);
+  const sourceKey = file
+    ? `${file.name}:${file.size}:${file.lastModified}`
+    : imageUrl ?? "";
+  const [failedSource, setFailedSource] = useState<string | null>(null);
 
-  useEffect(() => () => {
-    if (objectUrl) URL.revokeObjectURL(objectUrl);
-  }, [objectUrl]);
+  useEffect(() => {
+    if (!file || !imageRef.current) return;
 
-  if (!objectUrl && !imageUrl) {
-    return <div className="poster-image-placeholder">사진 미리보기</div>;
+    const nextObjectUrl = URL.createObjectURL(file);
+    imageRef.current.src = nextObjectUrl;
+    return () => URL.revokeObjectURL(nextObjectUrl);
+  }, [file]);
+
+  if (!file && !imageUrl) {
+    return (
+      <div className={styles.imageFallback} role="img" aria-label={`${alt}: 선택된 사진 없음`}>
+        <ImageSquare size={28} aria-hidden="true" />
+        <span>사진 미리보기</span>
+      </div>
+    );
   }
 
-  // eslint-disable-next-line @next/next/no-img-element
-  return <img src={objectUrl || imageUrl} alt={alt} />;
+  if (failedSource === sourceKey) {
+    return (
+      <div className={styles.imageFallback} role="img" aria-label={`${alt}: 이미지를 불러오지 못함`}>
+        <WarningCircle size={28} aria-hidden="true" />
+        <span>이미지를 불러올 수 없습니다.</span>
+      </div>
+    );
+  }
+
+  return (
+    // The endpoint returns arbitrary remote hosts and the static export cannot
+    // enumerate them for next/image safely.
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      ref={imageRef}
+      src={file ? undefined : imageUrl}
+      alt={alt}
+      loading="lazy"
+      onError={() => setFailedSource(sourceKey)}
+    />
+  );
+}
+
+function LightboxDialog({ poster, onClose }: { poster: Poster | null; onClose: () => void }) {
+  const dialogRef = useRef<HTMLDialogElement | null>(null);
+
+  useEffect(() => {
+    if (!poster || !dialogRef.current) return;
+    const dialog = dialogRef.current;
+    const previousFocus = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+    dialog.showModal();
+    dialog.querySelector<HTMLElement>("[data-autofocus]")?.focus();
+
+    return () => {
+      if (dialog.open) dialog.close();
+      previousFocus?.focus();
+    };
+  }, [poster]);
+
+  if (!poster) return null;
+
+  return (
+    <dialog
+      ref={dialogRef}
+      className={`${styles.dialog} ${styles.lightboxDialog}`}
+      aria-labelledby="poster-lightbox-title"
+      onCancel={(event) => {
+        event.preventDefault();
+        onClose();
+      }}
+      onClick={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <div className={styles.dialogSurface}>
+        <header className={styles.dialogHeader}>
+          <div>
+            <span>홈 포스터 #{poster.id}</span>
+            <h2 id="poster-lightbox-title">포스터 크게 보기</h2>
+          </div>
+          <button
+            className={styles.iconButton}
+            type="button"
+            aria-label="확대 보기 닫기"
+            data-autofocus
+            onClick={onClose}
+          >
+            <X size={20} aria-hidden="true" />
+          </button>
+        </header>
+        <div className={styles.lightboxImage}>
+          <PosterImage imageUrl={poster.imageUrl} alt={`홈 포스터 ${poster.id} 확대 이미지`} />
+        </div>
+      </div>
+    </dialog>
+  );
+}
+
+function DeletePosterDialog({
+  poster,
+  busy,
+  onCancel,
+  onConfirm,
+}: {
+  poster: Poster | null;
+  busy: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const dialogRef = useRef<HTMLDialogElement | null>(null);
+
+  useEffect(() => {
+    if (!poster || !dialogRef.current) return;
+    const dialog = dialogRef.current;
+    const previousFocus = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+    dialog.showModal();
+    dialog.querySelector<HTMLElement>("[data-autofocus]")?.focus();
+
+    return () => {
+      if (dialog.open) dialog.close();
+      previousFocus?.focus();
+    };
+  }, [poster]);
+
+  if (!poster) return null;
+
+  return (
+    <dialog
+      ref={dialogRef}
+      className={`${styles.dialog} ${styles.deleteDialog}`}
+      aria-labelledby="delete-poster-title"
+      aria-describedby="delete-poster-description"
+      onCancel={(event) => {
+        event.preventDefault();
+        if (!busy) onCancel();
+      }}
+      onClick={(event) => {
+        if (!busy && event.target === event.currentTarget) onCancel();
+      }}
+    >
+      <div className={styles.dialogSurface}>
+        <header className={styles.dialogHeader}>
+          <div>
+            <span>삭제 대상 #{poster.id}</span>
+            <h2 id="delete-poster-title">이 포스터를 삭제할까요?</h2>
+          </div>
+          <button
+            className={styles.iconButton}
+            type="button"
+            aria-label="삭제 확인 닫기"
+            data-autofocus
+            onClick={onCancel}
+            disabled={busy}
+          >
+            <X size={20} aria-hidden="true" />
+          </button>
+        </header>
+        <div className={styles.deletePreview}>
+          <PosterImage imageUrl={poster.imageUrl} alt={`삭제할 홈 포스터 ${poster.id}`} />
+        </div>
+        <p className={styles.deleteDescription} id="delete-poster-description">
+          삭제한 사진은 복구할 수 없습니다. 다른 포스터는 그대로 유지됩니다.
+        </p>
+        <div className={styles.dialogActions}>
+          <button className="button button-secondary" type="button" onClick={onCancel} disabled={busy}>
+            취소
+          </button>
+          <button className="button button-danger" type="button" onClick={onConfirm} disabled={busy}>
+            <Trash size={16} aria-hidden="true" />
+            {busy ? "삭제 중..." : "포스터 삭제"}
+          </button>
+        </div>
+      </div>
+    </dialog>
+  );
+}
+
+function PosterSkeletons() {
+  return (
+    <div className={styles.skeletonGrid} role="status" aria-live="polite">
+      <span className={styles.visuallyHidden}>포스터 목록을 불러오고 있습니다.</span>
+      {Array.from({ length: 4 }, (_, index) => (
+        <div className={styles.skeletonCard} aria-hidden="true" key={index}>
+          <span className={styles.skeletonImage} />
+          <span className={styles.skeletonLine} />
+          <span className={styles.skeletonLineShort} />
+        </div>
+      ))}
+    </div>
+  );
 }
 
 export default function ManagePosterPage() {
@@ -119,11 +314,24 @@ export default function ManagePosterPage() {
   const [dragging, setDragging] = useState(false);
   const [busyAction, setBusyAction] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<Poster | null>(null);
+  const [previewTarget, setPreviewTarget] = useState<Poster | null>(null);
   const [feedback, setFeedback] = useState<Feedback | null>(null);
   const listController = useRef<AbortController | null>(null);
   const newFileInputRef = useRef<HTMLInputElement | null>(null);
   const mutationInProgress = useRef(false);
   const isBusy = Boolean(busyAction);
+  const hasPendingFiles = Boolean(
+    newFile || Object.values(replacementFiles).some(Boolean),
+  );
+
+  useEffect(() => {
+    if (!hasPendingFiles) return;
+    const warnBeforeLeave = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+    };
+    window.addEventListener("beforeunload", warnBeforeLeave);
+    return () => window.removeEventListener("beforeunload", warnBeforeLeave);
+  }, [hasPendingFiles]);
 
   const loadPosters = useCallback(async () => {
     listController.current?.abort();
@@ -228,7 +436,7 @@ export default function ManagePosterPage() {
       setFeedback({
         tone: "success",
         title: "포스터를 등록했습니다.",
-        message: "홈 화면에 보여 줄 포스터 목록을 새로 불러왔습니다.",
+        message: "관리자 포스터 목록을 새로 불러왔습니다.",
       });
       await loadPosters();
     } catch (requestError) {
@@ -266,7 +474,7 @@ export default function ManagePosterPage() {
       setFeedback({
         tone: "success",
         title: "포스터 이미지를 교체했습니다.",
-        message: "선택한 새 사진이 반영되었습니다.",
+        message: "선택한 새 사진이 관리자 포스터 데이터에 반영되었습니다.",
       });
       await loadPosters();
     } catch (requestError) {
@@ -299,6 +507,15 @@ export default function ManagePosterPage() {
       await loadPosters();
     } catch (requestError) {
       setDeleteTarget(null);
+      if (requestError instanceof ApiError && requestError.status === 404) {
+        await loadPosters();
+        setFeedback({
+          tone: "error",
+          title: "이미 삭제된 포스터입니다.",
+          message: "최신 포스터 목록을 다시 불러왔습니다.",
+        });
+        return;
+      }
       setFeedback({
         tone: "error",
         title: "포스터를 삭제하지 못했습니다.",
@@ -312,33 +529,50 @@ export default function ManagePosterPage() {
 
   return (
     <AdminLoginNotice returnTo="/posters/manage">
-      <div className="poster-management-page stack-lg">
+      <UnsavedChangesDialog dirty={hasPendingFiles} />
+      <div className={styles.page}>
         {feedback && (
           <div
-            className={`poster-page-feedback feedback feedback-${feedback.tone} page-feedback`}
+            className={`${styles.feedback} ${feedback.tone === "error" ? styles.feedbackError : styles.feedbackSuccess}`}
             role={feedback.tone === "error" ? "alert" : "status"}
             aria-live="polite"
           >
-            <strong>{feedback.title}</strong>
-            <span>{feedback.message}</span>
+            {feedback.tone === "error" ? (
+              <WarningCircle size={20} aria-hidden="true" />
+            ) : (
+              <CheckCircle size={20} aria-hidden="true" />
+            )}
+            <div>
+              <strong>{feedback.title}</strong>
+              <span>{feedback.message}</span>
+            </div>
+            <button type="button" aria-label="알림 닫기" onClick={() => setFeedback(null)}>
+              <X size={18} aria-hidden="true" />
+            </button>
           </div>
         )}
 
-        <section className="panel poster-upload-panel" aria-labelledby="poster-upload-title">
-          <div className="poster-panel-heading panel-heading panel-heading-border">
+        <section className={styles.surface} aria-labelledby="poster-upload-title">
+          <header className={styles.sectionHeader}>
             <div>
-              <span className="eyebrow dark">새 포스터</span>
-              <h2 id="poster-upload-title">포스터 사진 등록</h2>
-              <p>홈 화면에 새로 보여 줄 포스터 사진을 선택해 주세요.</p>
+              <h2 id="poster-upload-title">포스터 등록</h2>
+              <p>이미지 한 장을 선택하고 미리보기를 확인한 뒤 등록합니다.</p>
             </div>
-            <span className="file-limit-badge">사진당 최대 5MB</span>
+            <span className={styles.limitText}>최대 5MB</span>
+          </header>
+
+          <div className={styles.adminNotice} role="note">
+            <WarningCircle size={19} aria-hidden="true" />
+            <p>
+              이 화면은 관리자 등록 데이터를 관리합니다. 실제 사용자 화면의 노출 상태는 이곳에서 확인할 수 없습니다.
+            </p>
           </div>
 
-          <div className="poster-upload-grid">
-            {!newFile ? (
-              <div>
+          <div className={styles.uploadLayout}>
+            <div className={styles.uploadWorkspace}>
+              {!newFile ? (
                 <label
-                  className={`poster-drop-zone course-drop-zone ${dragging ? "is-dragging" : ""} ${isBusy ? "is-disabled" : ""}`}
+                  className={`${styles.dropZone} ${dragging ? styles.dropZoneDragging : ""} ${isBusy ? styles.disabled : ""}`}
                   tabIndex={isBusy ? -1 : 0}
                   aria-disabled={isBusy}
                   onKeyDown={openFilePicker}
@@ -354,7 +588,7 @@ export default function ManagePosterPage() {
                 >
                   <input
                     ref={newFileInputRef}
-                    className="course-file-input"
+                    className={styles.fileInput}
                     type="file"
                     accept=".jpg,.jpeg,.png,.gif,image/jpeg,image/png,image/gif"
                     disabled={isBusy}
@@ -362,198 +596,231 @@ export default function ManagePosterPage() {
                     onClick={(event) => { event.currentTarget.value = ""; }}
                     onChange={(event) => chooseNewFile(event.target.files?.[0] ?? null)}
                   />
-                  <span className="drop-zone-icon" aria-hidden="true"><span>사진</span></span>
-                  <span className="drop-zone-copy">
-                    <strong>{dragging ? "여기에 사진을 놓아 주세요" : "사진을 끌어놓거나 눌러서 선택하세요"}</strong>
-                    <span>가로형 포스터 사진을 권장합니다.</span>
+                  <span className={styles.dropIcon} aria-hidden="true">
+                    <UploadSimple size={23} />
                   </span>
-                  <span className="button button-secondary drop-zone-button" aria-hidden="true">사진 선택</span>
+                  <strong>{dragging ? "여기에 사진을 놓아 주세요" : "사진을 끌어놓거나 선택하세요"}</strong>
+                  <span>가로형 이미지를 권장합니다.</span>
+                  <span className={styles.selectButton}>사진 선택</span>
                 </label>
-                <p className="poster-file-rules course-file-rules" id="poster-file-rules">
-                  <strong>지원 형식</strong> JPG · JPEG · PNG · GIF <span aria-hidden="true">·</span> <strong>최대 용량</strong> 5MB
-                </p>
-              </div>
-            ) : (
-              <div className="poster-upload-preview">
-                <div className="poster-image-frame">
-                  <PosterImage file={newFile} alt="새 포스터 미리보기" />
-                </div>
-                <div className="poster-file-meta selected-course-file">
-                  <span className="selected-file-extension" aria-hidden="true">IMG</span>
-                  <div>
-                    <strong>{newFile.name}</strong>
-                    <span>{formatFileSize(newFile.size)}</span>
+              ) : (
+                <div className={styles.newPreview}>
+                  <div className={styles.newPreviewImage}>
+                    <PosterImage file={newFile} alt="새 포스터 미리보기" />
                   </div>
-                  <button
-                    className="selected-file-remove"
-                    type="button"
-                    aria-label="선택한 사진 취소"
-                    onClick={() => setNewFile(null)}
-                    disabled={isBusy}
-                  >
-                    &times;
-                  </button>
+                  <div className={styles.selectedFile}>
+                    <ImageSquare size={20} aria-hidden="true" />
+                    <div>
+                      <strong>{newFile.name}</strong>
+                      <span>{formatFileSize(newFile.size)}</span>
+                    </div>
+                    <button
+                      className={styles.iconButton}
+                      type="button"
+                      aria-label="선택한 사진 취소"
+                      onClick={() => setNewFile(null)}
+                      disabled={isBusy}
+                    >
+                      <X size={18} aria-hidden="true" />
+                    </button>
+                  </div>
+                  <div className={styles.uploadActions}>
+                    <button className="button button-secondary" type="button" onClick={() => setNewFile(null)} disabled={isBusy}>
+                      다시 선택
+                    </button>
+                    <button className="button button-primary" type="button" onClick={createPoster} disabled={isBusy}>
+                      <Plus size={16} aria-hidden="true" />
+                      {busyAction === "create" ? "등록 중..." : "포스터 등록"}
+                    </button>
+                  </div>
                 </div>
-                <div className="poster-upload-actions form-actions form-actions-end">
-                  <button className="button button-secondary" type="button" onClick={() => setNewFile(null)} disabled={isBusy}>
-                    다시 선택
-                  </button>
-                  <button className="button button-primary" type="button" onClick={createPoster} disabled={isBusy}>
-                    {busyAction === "create" ? "등록 중..." : "이 사진 등록"}
-                  </button>
-                </div>
-              </div>
-            )}
+              )}
+            </div>
 
-            <aside className="poster-upload-guide" aria-label="사진 등록 안내">
-              <span className="eyebrow dark">등록 전 확인</span>
-              <h3>사진이 잘 보이는지 확인해 주세요.</h3>
-              <ul>
-                <li>JPG, JPEG, PNG, GIF 사진을 사용할 수 있습니다.</li>
-                <li>사진 한 장의 크기는 5MB 이하여야 합니다.</li>
-                <li>등록한 순서대로 홈 화면에 표시됩니다.</li>
-              </ul>
+            <aside className={styles.rulesPanel} aria-labelledby="poster-file-rules">
+              <h3 id="poster-file-rules">등록 기준</h3>
+              <dl>
+                <div>
+                  <dt>파일 형식</dt>
+                  <dd>JPG, JPEG, PNG, GIF</dd>
+                </div>
+                <div>
+                  <dt>파일 크기</dt>
+                  <dd>한 장당 5MB 이하</dd>
+                </div>
+                <div>
+                  <dt>등록 단위</dt>
+                  <dd>요청 한 번에 한 장</dd>
+                </div>
+              </dl>
             </aside>
           </div>
         </section>
 
-        <section className="panel poster-list-panel" aria-labelledby="poster-list-title">
-          <div className="poster-list-heading panel-heading panel-heading-border">
+        <section className={styles.surface} aria-labelledby="poster-list-title">
+          <header className={styles.sectionHeader}>
             <div>
-              <span className="eyebrow dark">현재 포스터</span>
-              <h2 id="poster-list-title">등록된 포스터</h2>
-              <p>사진을 교체하거나 더 이상 쓰지 않는 포스터를 삭제할 수 있습니다.</p>
+              <div className={styles.titleRow}>
+                <h2 id="poster-list-title">등록 포스터</h2>
+                <span className={styles.count} aria-live="polite">
+                  {listState === "ready" ? `${posters.length}장` : "확인 중"}
+                </span>
+              </div>
+              <p>등록 순서대로 사진과 변경 이력을 확인하고 교체하거나 삭제할 수 있습니다.</p>
             </div>
-            <div className="poster-list-tools">
-              <span className="poster-count" aria-live="polite">
-                {listState === "ready" ? `${posters.length}장` : "확인 중"}
-              </span>
-              <button
-                className="button button-secondary"
-                type="button"
-                onClick={() => void loadPosters()}
-                disabled={isBusy || listState === "loading"}
-              >
-                {listState === "loading" ? "불러오는 중..." : "목록 새로고침"}
-              </button>
-            </div>
+            <button
+              className="button button-secondary"
+              type="button"
+              onClick={() => void loadPosters()}
+              disabled={isBusy || listState === "loading"}
+            >
+              <ArrowClockwise size={16} aria-hidden="true" />
+              {listState === "loading" ? "불러오는 중..." : "새로고침"}
+            </button>
+          </header>
+
+          <div className={styles.listBody}>
+            {listState === "idle" && (
+              <div className={styles.state} role="status">
+                <ImageSquare size={30} aria-hidden="true" />
+                <strong>로그인 상태를 확인하고 있습니다.</strong>
+                <p>잠시만 기다려 주세요.</p>
+              </div>
+            )}
+            {listState === "loading" && <PosterSkeletons />}
+            {listState === "error" && (
+              <div className={`${styles.state} ${styles.errorState}`} role="alert">
+                <WarningCircle size={31} aria-hidden="true" />
+                <strong>포스터 목록을 불러오지 못했습니다.</strong>
+                <p>{listError}</p>
+                <button className="button button-secondary" type="button" onClick={() => void loadPosters()} disabled={isBusy}>
+                  <ArrowClockwise size={16} aria-hidden="true" />
+                  다시 시도
+                </button>
+              </div>
+            )}
+            {listState === "ready" && posters.length === 0 && (
+              <div className={styles.state} role="status">
+                <span className={styles.emptyIcon} aria-hidden="true"><ImageSquare size={27} /></span>
+                <strong>등록된 포스터가 없습니다.</strong>
+                <p>위 등록 영역에서 첫 포스터 사진을 추가할 수 있습니다.</p>
+              </div>
+            )}
+
+            {listState === "ready" && posters.length > 0 && (
+              <div className={styles.gallery}>
+                {posters.map((poster) => {
+                  const replacementFile = replacementFiles[poster.id];
+                  const replacing = busyAction === `replace-${poster.id}`;
+                  const deleting = busyAction === `delete-${poster.id}`;
+                  return (
+                    <article className={styles.card} key={poster.id} aria-busy={replacing || deleting || undefined}>
+                      <div className={styles.cardHeading}>
+                        <span>홈 포스터</span>
+                        <strong>#{poster.id}</strong>
+                      </div>
+
+                      <button
+                        className={styles.imageButton}
+                        type="button"
+                        onClick={() => setPreviewTarget(poster)}
+                        aria-label={`홈 포스터 ${poster.id} 크게 보기`}
+                      >
+                        <span className={styles.cardImage}>
+                          <PosterImage imageUrl={poster.imageUrl} alt={`등록된 홈 포스터 ${poster.id}`} />
+                        </span>
+                        <span className={styles.zoomHint} aria-hidden="true"><ImageSquare size={18} /></span>
+                      </button>
+
+                      <div className={styles.cardBody}>
+                        <dl className={styles.metadata}>
+                          <div>
+                            <dt>등록일</dt>
+                            <dd><time dateTime={poster.createdAt}>{formatDateTime(poster.createdAt)}</time></dd>
+                          </div>
+                          <div>
+                            <dt>수정일</dt>
+                            <dd><time dateTime={poster.updatedAt}>{formatDateTime(poster.updatedAt)}</time></dd>
+                          </div>
+                        </dl>
+
+                        {replacementFile ? (
+                          <div className={styles.replacementPanel}>
+                            <div className={styles.replacementHeading}>
+                              <strong>교체 전후 비교</strong>
+                              <span>저장 전</span>
+                            </div>
+                            <div className={styles.compareGrid}>
+                              <figure>
+                                <div className={styles.compareImage}>
+                                  <PosterImage imageUrl={poster.imageUrl} alt={`현재 홈 포스터 ${poster.id}`} />
+                                </div>
+                                <figcaption>현재 사진</figcaption>
+                              </figure>
+                              <figure>
+                                <div className={styles.compareImage}>
+                                  <PosterImage
+                                    file={replacementFile}
+                                    imageUrl={poster.imageUrl}
+                                    alt="선택한 교체 사진"
+                                  />
+                                </div>
+                                <figcaption>선택한 사진</figcaption>
+                              </figure>
+                            </div>
+                            <div className={styles.replacementFile}>
+                              <strong>{replacementFile.name}</strong>
+                              <span>{formatFileSize(replacementFile.size)}</span>
+                            </div>
+                            <div className={styles.cardActions}>
+                              <button
+                                className="button button-secondary"
+                                type="button"
+                                onClick={() => setReplacementFiles((current) => ({ ...current, [poster.id]: null }))}
+                                disabled={isBusy}
+                              >
+                                선택 취소
+                              </button>
+                              <button className="button button-primary" type="button" onClick={() => void replacePoster(poster)} disabled={isBusy}>
+                                {replacing ? "교체 중..." : "선택한 사진으로 교체"}
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className={styles.cardActions}>
+                            <label className={`button button-secondary ${styles.fileButton} ${isBusy ? styles.disabled : ""}`}>
+                              이미지 교체
+                              <input
+                                type="file"
+                                accept=".jpg,.jpeg,.png,.gif,image/jpeg,image/png,image/gif"
+                                disabled={isBusy}
+                                onClick={(event) => { event.currentTarget.value = ""; }}
+                                onChange={(event) => chooseReplacement(poster, event.target.files?.[0] ?? null)}
+                              />
+                            </label>
+                            <button className={styles.deleteButton} type="button" onClick={() => setDeleteTarget(poster)} disabled={isBusy}>
+                              <Trash size={16} aria-hidden="true" />
+                              {deleting ? "삭제 중..." : "삭제"}
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+            )}
           </div>
-
-          {listState === "idle" && (
-            <div className="poster-state" role="status">
-              <strong>로그인 상태를 확인하고 있습니다.</strong>
-              <p>잠시만 기다려 주세요.</p>
-            </div>
-          )}
-          {listState === "loading" && (
-            <div className="poster-state" role="status" aria-live="polite">
-              <span className="upload-spinner" aria-hidden="true" />
-              <strong>포스터 목록을 불러오고 있습니다.</strong>
-              <p>등록된 사진을 확인하는 중입니다.</p>
-            </div>
-          )}
-          {listState === "error" && (
-            <div className="poster-state poster-state-error" role="alert">
-              <strong>포스터 목록을 불러오지 못했습니다.</strong>
-              <p>{listError}</p>
-              <button className="button button-secondary" type="button" onClick={() => void loadPosters()} disabled={isBusy}>
-                다시 시도
-              </button>
-            </div>
-          )}
-          {listState === "ready" && posters.length === 0 && (
-            <div className="poster-empty-state poster-state" role="status">
-              <span aria-hidden="true">+</span>
-              <strong>등록된 포스터가 없습니다.</strong>
-              <p>위에서 사진을 선택하면 첫 포스터를 등록할 수 있습니다.</p>
-            </div>
-          )}
-
-          {listState === "ready" && posters.length > 0 && (
-            <div className="poster-gallery">
-              {posters.map((poster) => {
-                const replacementFile = replacementFiles[poster.id];
-                const replacing = busyAction === `replace-${poster.id}`;
-                const deleting = busyAction === `delete-${poster.id}`;
-                return (
-                  <article className="poster-card" key={poster.id} aria-busy={replacing || deleting || undefined}>
-                    <div className={`poster-image-frame ${replacementFile ? "poster-replace-preview" : ""}`}>
-                      <PosterImage
-                        file={replacementFile}
-                        imageUrl={poster.imageUrl}
-                        alt={replacementFile ? "교체할 포스터 미리보기" : "등록된 홈 화면 포스터"}
-                      />
-                      {replacementFile && <span className="poster-preview-badge">교체 전 미리보기</span>}
-                    </div>
-
-                    <div className="poster-card-body">
-                      <dl className="poster-card-meta">
-                        <div>
-                          <dt>등록일</dt>
-                          <dd><time dateTime={poster.createdAt}>{formatDateTime(poster.createdAt)}</time></dd>
-                        </div>
-                        <div>
-                          <dt>마지막 교체일</dt>
-                          <dd><time dateTime={poster.updatedAt}>{formatDateTime(poster.updatedAt)}</time></dd>
-                        </div>
-                      </dl>
-
-                      {replacementFile ? (
-                        <div className="poster-replace-panel">
-                          <div className="poster-replace-file">
-                            <strong>{replacementFile.name}</strong>
-                            <span>{formatFileSize(replacementFile.size)}</span>
-                          </div>
-                          <div className="poster-card-actions">
-                            <button
-                              className="button button-secondary"
-                              type="button"
-                              onClick={() => setReplacementFiles((current) => ({ ...current, [poster.id]: null }))}
-                              disabled={isBusy}
-                            >
-                              선택 취소
-                            </button>
-                            <button className="button button-primary" type="button" onClick={() => void replacePoster(poster)} disabled={isBusy}>
-                              {replacing ? "교체 중..." : "선택한 사진으로 교체"}
-                            </button>
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="poster-card-actions">
-                          <label className={`button button-secondary poster-file-button ${isBusy ? "is-disabled" : ""}`}>
-                            이미지 교체
-                            <input
-                              type="file"
-                              accept=".jpg,.jpeg,.png,.gif,image/jpeg,image/png,image/gif"
-                              disabled={isBusy}
-                              onClick={(event) => { event.currentTarget.value = ""; }}
-                              onChange={(event) => chooseReplacement(poster, event.target.files?.[0] ?? null)}
-                            />
-                          </label>
-                          <button className="button button-danger" type="button" onClick={() => setDeleteTarget(poster)} disabled={isBusy}>
-                            {deleting ? "삭제 중..." : "삭제"}
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  </article>
-                );
-              })}
-            </div>
-          )}
         </section>
 
-        <ConfirmDialog
-          open={Boolean(deleteTarget)}
-          title="이 포스터를 삭제할까요?"
-          description="삭제한 포스터 사진은 다시 되돌릴 수 없습니다."
-          confirmLabel="포스터 삭제"
-          danger
+        <LightboxDialog poster={previewTarget} onClose={() => setPreviewTarget(null)} />
+        <DeletePosterDialog
+          poster={deleteTarget}
           busy={Boolean(deleteTarget && busyAction === `delete-${deleteTarget.id}`)}
           onCancel={() => {
             if (!isBusy) setDeleteTarget(null);
           }}
-          onConfirm={deletePoster}
+          onConfirm={() => void deletePoster()}
         />
       </div>
     </AdminLoginNotice>
