@@ -1,8 +1,9 @@
 import { clearAdminSession, getAdminAccessToken } from "./auth";
+import { normalizeApiPayload } from "./api-resource-urls";
 import { createApiHeaders, isAdminApiPath } from "./request-headers";
 
 export const API_BASE_URL = (
-  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://34.64.250.12:8080"
+  process.env.NEXT_PUBLIC_API_BASE_URL ?? "https://api.hsmate.win"
 ).replace(/\/$/, "");
 
 export class ApiError extends Error {
@@ -107,7 +108,7 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise
     );
   }
 
-  return payload as T;
+  return normalizeApiPayload(payload, API_BASE_URL) as T;
 }
 
 export function getErrorText(error: unknown): string {

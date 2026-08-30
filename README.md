@@ -28,10 +28,10 @@ npm install
 npm run dev
 ```
 
-API 기본 주소는 `http://34.64.250.12:8080`이며 `.env.local`에서 바꿀 수 있습니다.
+API 기본 주소는 `https://api.hsmate.win`이며 `.env.local`에서 바꿀 수 있습니다.
 
 ```bash
-NEXT_PUBLIC_API_BASE_URL=https://api.example.com
+NEXT_PUBLIC_API_BASE_URL=https://api.hsmate.win
 ```
 
 ## 검증과 배포
@@ -46,12 +46,9 @@ npm run deploy:firebase
 
 Firebase 프로젝트와 Hosting 사이트 ID는 `hsmate-admin`입니다.
 
-## 운영 전 필수 조치
+## 운영 전 확인 사항
 
-Firebase Hosting은 HTTPS이므로 현재 HTTP API를 브라우저에서 직접 호출할 수 없습니다. 실제 CRUD 운영 전 다음 항목이 필요합니다.
+운영 API는 HTTPS를 사용합니다. 실제 CRUD 운영 전 다음 항목을 확인합니다.
 
-1. API HTTPS 적용 또는 인증된 동일 출처 프록시 구성
-2. Firebase Hosting 도메인 CORS 허용
-3. 서버 측 관리자 인증과 권한 검사
-
-현재 배포본은 HTTPS 페이지에서 HTTP API 요청을 감지하면 요청을 보내지 않고 운영자에게 설정 오류를 안내합니다.
+1. Firebase Hosting과 Sites 도메인 CORS 허용
+2. 서버 측 관리자 인증과 권한 검사

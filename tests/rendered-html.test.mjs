@@ -101,15 +101,24 @@ test("exports site metadata and social image", async () => {
   await access(new URL("out/og.png", root));
 });
 
-test("keeps Firebase Hosting configuration aligned with static export", async () => {
-  const [firebaseConfig, nextConfig, packageJson] = await Promise.all([
+test("keeps deployment configuration aligned with static export and the production API", async () => {
+  const [firebaseConfig, nextConfig, packageJson, apiSource, envExample] = await Promise.all([
     readFile(new URL("firebase.json", root), "utf8"),
     readFile(new URL("next.config.ts", root), "utf8"),
     readFile(new URL("package.json", root), "utf8"),
+    readFile(new URL("app/lib/api.ts", root), "utf8"),
+    readFile(new URL(".env.example", root), "utf8"),
   ]);
 
   assert.match(firebaseConfig, /"public": "out"/);
   assert.match(firebaseConfig, /"trailingSlash": true/);
+  assert.match(firebaseConfig, /connect-src 'self' https:\/\/api\.hsmate\.win/);
+  assert.match(apiSource, /"https:\/\/api\.hsmate\.win"/);
+  assert.equal(envExample.trim(), "NEXT_PUBLIC_API_BASE_URL=https://api.hsmate.win");
+  assert.doesNotMatch(
+    firebaseConfig + apiSource + envExample,
+    /http:\/\/34\.64\.250\.12:8080/,
+  );
   assert.match(nextConfig, /output: "export"/);
   assert.match(packageJson, /"name": "hsmate-admin"/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
