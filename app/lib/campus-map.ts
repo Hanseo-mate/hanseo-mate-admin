@@ -8,7 +8,7 @@ export const campusOptions = [
 export const categoryOptions = [
   { value: "RESTAURANT", label: "음식점" },
   { value: "CAFE", label: "카페" },
-  { value: "LECTURE_BUILDING", label: "강의실" },
+  { value: "LECTURE_BUILDING", label: "교내시설" },
   { value: "CONVENIENCE_FACILITY", label: "편의시설" },
 ] as const;
 
@@ -131,9 +131,6 @@ export const emptyCampusMapPlaceForm = initialCampusPlaceForm;
 const campusCodes = new Set<string>(campusOptions.map((option) => option.value));
 const campusPlaceCategories = new Set<string>(
   categoryOptions.map((option) => option.value),
-);
-const categoryNames = new Map<CampusPlaceCategory, string>(
-  categoryOptions.map((option) => [option.value, option.label]),
 );
 const campusMapImageTypes = new Set(["image/jpeg", "image/png", "image/gif"]);
 const decimalCoordinatePattern = /^-?\d+(?:\.\d{1,9})?$/;
@@ -294,11 +291,10 @@ function parseCampusMapPlaceBase(value: unknown): CampusMapPlaceBase {
     invalidCampusMapData();
   }
 
-  const categoryName = requiredResponseString(value.categoryName);
-  const expectedCategoryName = categoryNames.get(value.category);
-  if (categoryName !== expectedCategoryName) {
-    invalidCampusMapData();
-  }
+  // category is the API contract value. categoryName is presentation text and
+  // has changed independently in production (for example, 강의실 -> 교내시설),
+  // so a wording change must not make the entire 200 list unusable.
+  const categoryName = requiredResponseString(value.categoryName).trim();
 
   const imageUrl = nullableResponseString(value.imageUrl, 2_048);
   if (imageUrl && !isHttpUrl(imageUrl)) {
@@ -306,10 +302,6 @@ function parseCampusMapPlaceBase(value: unknown): CampusMapPlaceBase {
   }
 
   const address = optionalResponseString(value.address, 255);
-
-  if (value.category === "LECTURE_BUILDING" && address !== undefined) {
-    invalidCampusMapData();
-  }
 
   return {
     placeId: positiveInteger(value.placeId),

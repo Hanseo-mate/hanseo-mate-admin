@@ -58,7 +58,7 @@ function makeLectureBuilding(overrides = {}) {
     campusCode: "SEOSAN",
     placeName: "공학관",
     category: "LECTURE_BUILDING",
-    categoryName: "강의실",
+    categoryName: "교내시설",
     oneLineDescription: "공학 계열 강의와 실습이 진행되는 건물",
     imageUrl: "https://api.example.com/uploads/campus-places/building.jpg",
     latitude: 36.690884,
@@ -103,7 +103,7 @@ test("keeps the documented campus and category values and parses the places wrap
   assert.deepEqual(campusMap.categoryOptions, [
     { value: "RESTAURANT", label: "음식점" },
     { value: "CAFE", label: "카페" },
-    { value: "LECTURE_BUILDING", label: "강의실" },
+    { value: "LECTURE_BUILDING", label: "교내시설" },
     { value: "CONVENIENCE_FACILITY", label: "편의시설" },
   ]);
 
@@ -116,9 +116,9 @@ test("keeps the documented campus and category values and parses the places wrap
     () => campusMap.parseCampusMapPlaceSummaries([expected]),
     /장소 목록/,
   );
-  assert.throws(
-    () => campusMap.parseCampusMapPlaceSummary(makeCafe({ categoryName: "음식" })),
-    /장소 정보를 확인할 수 없습니다/,
+  assert.equal(
+    campusMap.parseCampusMapPlaceSummary(makeCafe({ categoryName: "카페 및 베이커리" })).categoryName,
+    "카페 및 베이커리",
   );
 });
 
@@ -142,6 +142,20 @@ test("normalizes nullable legacy fields without hiding the entire 200 list", () 
   assert.equal(legacy.address, undefined);
   assert.equal(legacy.imageUrl, "");
   assert.equal(newlineImage.imageUrl, "https://api.example.com/place.jpg");
+});
+
+test("keeps a mixed list visible when production lecture metadata uses legacy values", () => {
+  const places = campusMap.parseCampusMapPlaceSummaries({
+    selectedCampusCode: null,
+    places: [
+      makeCafe(),
+      makeLectureBuilding({ address: "충남 태안군 남면 신온리" }),
+    ],
+  });
+
+  assert.equal(places.length, 2);
+  assert.equal(places[1].categoryName, "교내시설");
+  assert.equal(places[1].address, "충남 태안군 남면 신온리");
 });
 
 test("parses mutually exclusive detail shapes and maps a detail into the edit form", () => {
@@ -170,12 +184,10 @@ test("parses mutually exclusive detail shapes and maps a detail into the edit fo
     ),
     /장소 정보를 확인할 수 없습니다/,
   );
-  assert.throws(
-    () => campusMap.parseCampusMapPlaceDetail(
-      makeLectureBuilding({ address: "강의실에는 보낼 수 없는 주소" }),
-    ),
-    /장소 정보를 확인할 수 없습니다/,
+  const legacyLectureWithAddress = campusMap.parseCampusMapPlaceDetail(
+    makeLectureBuilding({ address: "충남 태안군 남면" }),
   );
+  assert.equal(legacyLectureWithAddress.address, undefined);
 
   const legacyCafe = campusMap.parseCampusMapPlaceDetail(makeCafe({
     lectureBuildingDetails: null,
