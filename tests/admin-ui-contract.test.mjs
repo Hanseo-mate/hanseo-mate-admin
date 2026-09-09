@@ -6,6 +6,8 @@ import ts from "typescript";
 const root = new URL("../", import.meta.url);
 const shellUrl = new URL("app/components/AppShell.tsx", root);
 const dashboardUrl = new URL("app/page.tsx", root);
+const unsavedDialogUrl = new URL("app/components/UnsavedChangesDialog.tsx", root);
+const authUrl = new URL("app/lib/auth.ts", root);
 
 function navigationRegion(source) {
   const region = source.match(
@@ -133,6 +135,8 @@ test("organizes the shell around the real administrator information architecture
     ["/system-notices/manage", "시스템 공지"],
     ["/calendars/manage", "학생회 일정"],
     ["/posters/manage", "홈 포스터"],
+    ["/popups/manage", "팝업 관리"],
+    ["/settings/festival-floating-button", "축제 플로팅 버튼"],
     ["/bus-schedules/manage", "버스 시간표"],
     ["/campus-map/manage", "캠퍼스맵"],
     ["/courses/major", "강의시간표 업로드"],
@@ -145,7 +149,7 @@ test("organizes the shell around the real administrator information architecture
     );
   }
 
-  assert.doesNotMatch(navigation, /설정|도움말|전체 데이터 검색/);
+  assert.doesNotMatch(navigation, /도움말|전체 데이터 검색/);
 
   const hasDedicatedClubApi = /\/api\/admin\/clubs(?:[/?"'`]|$)/.test(`${clubNew}\n${clubManage}`);
   const exposesClubManagement = /href: ["']\/clubs\/manage["']/.test(navigation);
@@ -158,6 +162,25 @@ test("organizes the shell around the real administrator information architecture
     assert.match(navigation, /label: ["']동아리 운영["']/);
     assert.match(navigation, /href: ["']\/clubs\/manage["'],\s*label: ["']동아리 관리["']/);
   }
+});
+
+test("protects unsaved work from links, history traversal, reloads, and logout", async () => {
+  const [shell, dialog, auth] = await Promise.all([
+    readFile(shellUrl, "utf8"),
+    readFile(unsavedDialogUrl, "utf8"),
+    readFile(authUrl, "utf8"),
+  ]);
+
+  assert.match(shell, /requestAdminLogout\(\)/);
+  assert.match(auth, /ADMIN_LOGOUT_REQUEST_EVENT/);
+  assert.match(auth, /new Event\(ADMIN_LOGOUT_REQUEST_EVENT,\s*\{\s*cancelable:\s*true\s*\}\)/);
+  assert.match(auth, /if \(!window\.dispatchEvent\(request\)\) return false/);
+  assert.match(dialog, /document\.addEventListener\("click",\s*protectInternalNavigation,\s*true\)/);
+  assert.match(dialog, /addEventListener\(ADMIN_LOGOUT_REQUEST_EVENT,\s*protectLogout\)/);
+  assert.match(dialog, /addEventListener\("beforeunload",\s*warnBeforeLeave\)/);
+  assert.match(dialog, /event\.returnValue\s*=\s*""/);
+  assert.match(dialog, /event\.navigationType\s*!==\s*"traverse"/);
+  assert.match(dialog, /precommitHandler/);
 });
 
 test("loads dashboard metrics from the documented APIs without mock statistics", async () => {

@@ -5,6 +5,10 @@ import ts from "typescript";
 
 const helperUrl = new URL("../app/lib/campus-map.ts", import.meta.url);
 const helperSource = await readFile(helperUrl, "utf8");
+const pageSource = await readFile(
+  new URL("../app/campus-map/manage/page.tsx", import.meta.url),
+  "utf8",
+);
 const executableSource = helperSource.replace(
   'import { ApiError, apiFetch, getErrorText } from "./api";',
   `export class ApiError extends Error {
@@ -58,7 +62,7 @@ function makeLectureBuilding(overrides = {}) {
     campusCode: "SEOSAN",
     placeName: "공학관",
     category: "LECTURE_BUILDING",
-    categoryName: "강의실",
+    categoryName: "교내시설",
     oneLineDescription: "공학 계열 강의와 실습이 진행되는 건물",
     imageUrl: "https://api.example.com/uploads/campus-places/building.jpg",
     latitude: 36.690884,
@@ -67,7 +71,6 @@ function makeLectureBuilding(overrides = {}) {
       location: "서산캠퍼스 공학관",
       floorCount: 5,
       hasElevator: true,
-      operatingHours: "평일 09:00~22:00",
       departments: ["컴퓨터공학과", "항공소프트웨어공학과"],
       majorFacilities: ["전산실습실", "학과사무실"],
     },
@@ -88,8 +91,6 @@ function makeCafeForm(overrides = {}) {
     location: "",
     floorCount: "",
     hasElevator: false,
-    operatingHours: "",
-    departments: [""],
     majorFacilities: [""],
     ...overrides,
   };
@@ -103,7 +104,7 @@ test("keeps the documented campus and category values and parses the places wrap
   assert.deepEqual(campusMap.categoryOptions, [
     { value: "RESTAURANT", label: "음식점" },
     { value: "CAFE", label: "카페" },
-    { value: "LECTURE_BUILDING", label: "강의실" },
+    { value: "LECTURE_BUILDING", label: "교내시설" },
     { value: "CONVENIENCE_FACILITY", label: "편의시설" },
   ]);
 
@@ -116,9 +117,9 @@ test("keeps the documented campus and category values and parses the places wrap
     () => campusMap.parseCampusMapPlaceSummaries([expected]),
     /장소 목록/,
   );
-  assert.throws(
-    () => campusMap.parseCampusMapPlaceSummary(makeCafe({ categoryName: "음식" })),
-    /장소 정보를 확인할 수 없습니다/,
+  assert.equal(
+    campusMap.parseCampusMapPlaceSummary(makeCafe({ categoryName: "카페 및 베이커리" })).categoryName,
+    "카페 및 베이커리",
   );
 });
 
@@ -144,19 +145,33 @@ test("normalizes nullable legacy fields without hiding the entire 200 list", () 
   assert.equal(newlineImage.imageUrl, "https://api.example.com/place.jpg");
 });
 
+test("keeps a mixed list visible when production lecture metadata uses legacy values", () => {
+  const places = campusMap.parseCampusMapPlaceSummaries({
+    selectedCampusCode: null,
+    places: [
+      makeCafe(),
+      makeLectureBuilding({ address: "충남 태안군 남면 신온리" }),
+    ],
+  });
+
+  assert.equal(places.length, 2);
+  assert.equal(places[1].categoryName, "교내시설");
+  assert.equal(places[1].address, "충남 태안군 남면 신온리");
+});
+
 test("parses mutually exclusive detail shapes and maps a detail into the edit form", () => {
   const lecture = campusMap.parseCampusMapPlaceDetail(makeLectureBuilding());
   assert.equal(lecture.category, "LECTURE_BUILDING");
   assert.equal(lecture.address, undefined);
   assert.equal(lecture.lectureBuildingDetails.floorCount, 5);
+  assert.deepEqual(lecture.lectureBuildingDetails.departments, [
+    "컴퓨터공학과",
+    "항공소프트웨어공학과",
+  ]);
 
   const form = campusMap.campusMapPlaceDetailToForm(lecture);
   assert.equal(form.latitude, "36.690884");
   assert.equal(form.location, "서산캠퍼스 공학관");
-  assert.deepEqual(form.departments, [
-    "컴퓨터공학과",
-    "항공소프트웨어공학과",
-  ]);
 
   assert.throws(
     () => campusMap.parseCampusMapPlaceDetail(
@@ -170,12 +185,10 @@ test("parses mutually exclusive detail shapes and maps a detail into the edit fo
     ),
     /장소 정보를 확인할 수 없습니다/,
   );
-  assert.throws(
-    () => campusMap.parseCampusMapPlaceDetail(
-      makeLectureBuilding({ address: "강의실에는 보낼 수 없는 주소" }),
-    ),
-    /장소 정보를 확인할 수 없습니다/,
+  const legacyLectureWithAddress = campusMap.parseCampusMapPlaceDetail(
+    makeLectureBuilding({ address: "충남 태안군 남면" }),
   );
+  assert.equal(legacyLectureWithAddress.address, undefined);
 
   const legacyCafe = campusMap.parseCampusMapPlaceDetail(makeCafe({
     lectureBuildingDetails: null,
@@ -186,12 +199,11 @@ test("parses mutually exclusive detail shapes and maps a detail into the edit fo
     address: null,
     lectureBuildingDetails: {
       ...makeLectureBuilding().lectureBuildingDetails,
-      operatingHours: null,
       majorFacilities: [],
     },
   }));
   assert.equal(legacyLecture.address, undefined);
-  assert.equal(legacyLecture.lectureBuildingDetails.operatingHours, "");
+  assert.equal("operatingHours" in legacyLecture.lectureBuildingDetails, false);
   assert.deepEqual(legacyLecture.lectureBuildingDetails.majorFacilities, []);
   assert.deepEqual(
     campusMap.campusMapPlaceDetailToForm(legacyLecture).majorFacilities,
@@ -209,8 +221,6 @@ test("parses mutually exclusive detail shapes and maps a detail into the edit fo
       location: "",
       floorCount: "",
       hasElevator: false,
-      operatingHours: "",
-      departments: [""],
       majorFacilities: [""],
     },
   );
@@ -243,8 +253,6 @@ test("normalizes the exact non-lecture or lecture request branch", () => {
     location: "  서산캠퍼스 공학관  ",
     floorCount: "5",
     hasElevator: true,
-    operatingHours: "  평일 09:00~22:00  ",
-    departments: [" 컴퓨터공학과 ", "항공소프트웨어공학과"],
     majorFacilities: [" 전산실습실 ", "학과사무실"],
   }));
   assert.equal(lectureRequest.category, "LECTURE_BUILDING");
@@ -253,10 +261,10 @@ test("normalizes the exact non-lecture or lecture request branch", () => {
     location: "서산캠퍼스 공학관",
     floorCount: 5,
     hasElevator: true,
-    operatingHours: "평일 09:00~22:00",
-    departments: ["컴퓨터공학과", "항공소프트웨어공학과"],
     majorFacilities: ["전산실습실", "학과사무실"],
   });
+  assert.equal("operatingHours" in lectureRequest.lectureBuildingDetails, false);
+  assert.equal("departments" in lectureRequest.lectureBuildingDetails, false);
 
   assert.equal(campusMap.validateCampusPlaceRequest({
     ...lectureRequest,
@@ -294,8 +302,6 @@ test("validates documented field, coordinate, URL, and lecture-array limits", ()
       category: "LECTURE_BUILDING",
       location: "공학관",
       floorCount: "0",
-      operatingHours: "평일",
-      departments: ["컴퓨터공학과"],
       majorFacilities: ["강의실"],
     })) ?? "",
     /1 이상/,
@@ -304,8 +310,6 @@ test("validates documented field, coordinate, URL, and lecture-array limits", ()
     category: "LECTURE_BUILDING",
     location: "공학관",
     floorCount: "1.5",
-    operatingHours: "평일",
-    departments: ["컴퓨터공학과"],
     majorFacilities: ["강의실"],
   })), null);
   assert.match(
@@ -313,12 +317,14 @@ test("validates documented field, coordinate, URL, and lecture-array limits", ()
       category: "LECTURE_BUILDING",
       location: "공학관",
       floorCount: "3",
-      operatingHours: "평일",
-      departments: ["컴퓨터공학과", " 컴퓨터공학과 "],
-      majorFacilities: ["강의실"],
+      majorFacilities: ["강의실", " 강의실 "],
     })) ?? "",
     /중복/,
   );
+});
+
+test("keeps API-managed departments out of the administrator editor", () => {
+  assert.doesNotMatch(pageSource, /departments|입주 학과/);
 });
 
 test("builds one browser-managed file part and enforces JPG/PNG/GIF at 5 MiB", () => {

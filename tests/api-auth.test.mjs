@@ -10,6 +10,9 @@ test("recognizes every administrator API path", () => {
   assert.equal(isAdminApiPath("/api/admin/bus-schedules"), true);
   assert.equal(isAdminApiPath("/api/admin/campus-map/places"), true);
   assert.equal(isAdminApiPath("/api/admin/campus-map/place-images"), true);
+  assert.equal(isAdminApiPath("/api/admin/popups"), true);
+  assert.equal(isAdminApiPath("/api/admin/popups/7"), true);
+  assert.equal(isAdminApiPath("/api/admin/popups/7/enabled"), true);
   assert.equal(isAdminApiPath("/api/bus-schedules"), false);
   assert.equal(isAdminApiPath("/api/campus-map/places"), false);
   assert.equal(isAdminApiPath("/api/admin/clubs"), true);
@@ -81,6 +84,28 @@ test("adds auth to campus place images without overriding the form boundary", ()
   assert.equal(headers.get("Authorization"), "Bearer campus-map-test-token");
   assert.equal(headers.get("Accept"), "application/json");
   assert.equal(headers.has("Content-Type"), false);
+});
+
+test("adds auth to popup multipart requests without overriding the form boundary", () => {
+  for (const path of [
+    "/api/admin/popups",
+    "/api/admin/popups/7",
+  ]) {
+    const headers = createApiHeaders(path, undefined, "popup-test-token");
+
+    assert.equal(headers.get("Authorization"), "Bearer popup-test-token");
+    assert.equal(headers.get("Accept"), "application/json");
+    assert.equal(headers.has("Content-Type"), false);
+  }
+
+  const enabledHeaders = createApiHeaders(
+    "/api/admin/popups/7/enabled",
+    { "Content-Type": "application/json" },
+    "popup-test-token",
+  );
+  assert.equal(enabledHeaders.get("Authorization"), "Bearer popup-test-token");
+  assert.equal(enabledHeaders.get("Accept"), "application/json");
+  assert.equal(enabledHeaders.get("Content-Type"), "application/json");
 });
 
 test("keeps an explicitly supplied authorization header", () => {

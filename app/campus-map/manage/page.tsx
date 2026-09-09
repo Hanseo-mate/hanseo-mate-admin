@@ -80,7 +80,6 @@ const coordinatePattern = /^-?(?:\d+|\d*\.\d+)$/;
 function freshInitialForm(): CampusMapPlaceForm {
   return {
     ...initialCampusPlaceForm,
-    departments: [...initialCampusPlaceForm.departments],
     majorFacilities: [...initialCampusPlaceForm.majorFacilities],
   };
 }
@@ -162,18 +161,14 @@ function validateFields(form: CampusMapPlaceForm): FieldErrors {
 
   if (form.category === "LECTURE_BUILDING") {
     const location = textError(form.location, "건물 위치");
-    const operatingHours = textError(form.operatingHours, "운영 시간");
     const floorCount = form.floorCount.trim();
-    const departments = listError(form.departments, "학과");
     const facilities = listError(form.majorFacilities, "주요 시설");
 
     if (location) errors.location = location;
-    if (operatingHours) errors.operatingHours = operatingHours;
     const parsedFloorCount = Number(floorCount);
     if (!floorCount || !Number.isFinite(parsedFloorCount) || parsedFloorCount < 1) {
       errors.floorCount = "층수는 1 이상의 숫자로 입력해 주세요.";
     }
-    if (departments) errors.departments = departments;
     if (facilities) errors.majorFacilities = facilities;
   } else {
     const address = textError(form.address, "주소");
@@ -456,9 +451,6 @@ export default function ManageCampusMapPage() {
     setForm((current) => ({
       ...current,
       category,
-      departments: category === "LECTURE_BUILDING" && current.departments.length === 0
-        ? [""]
-        : current.departments,
       majorFacilities: category === "LECTURE_BUILDING" && current.majorFacilities.length === 0
         ? [""]
         : current.majorFacilities,
@@ -468,7 +460,7 @@ export default function ManageCampusMapPage() {
   }
 
   function changeListItem(
-    key: "departments" | "majorFacilities",
+    key: "majorFacilities",
     index: number,
     value: string,
   ) {
@@ -485,13 +477,13 @@ export default function ManageCampusMapPage() {
     setFeedback(null);
   }
 
-  function addListItem(key: "departments" | "majorFacilities") {
+  function addListItem(key: "majorFacilities") {
     setForm((current) => current[key].length >= ARRAY_LIMIT
       ? current
       : { ...current, [key]: [...current[key], ""] });
   }
 
-  function removeListItem(key: "departments" | "majorFacilities", index: number) {
+  function removeListItem(key: "majorFacilities", index: number) {
     setForm((current) => ({
       ...current,
       [key]: current[key].length <= 1
@@ -654,7 +646,7 @@ export default function ManageCampusMapPage() {
   function focusFirstError(errors: FieldErrors) {
     const firstField = Object.keys(errors)[0] as keyof CampusMapPlaceForm | undefined;
     if (!firstField) return;
-    const id = firstField === "departments" || firstField === "majorFacilities"
+    const id = firstField === "majorFacilities"
       ? `campus-map-${firstField}-0`
       : `campus-map-${firstField}`;
     window.requestAnimationFrame(() => document.getElementById(id)?.focus());
@@ -1194,28 +1186,9 @@ export default function ManageCampusMapPage() {
                             </select>
                           </label>
 
-                          <label className={styles.field} htmlFor="campus-map-operatingHours">
-                            <span className={styles.fieldHeading}>
-                              <span>운영 시간 <em>필수</em></span>
-                              <small>{form.operatingHours.length} / {TEXT_LIMIT}</small>
-                            </span>
-                            <input
-                              id="campus-map-operatingHours"
-                              type="text"
-                              value={form.operatingHours}
-                              maxLength={TEXT_LIMIT}
-                              placeholder="예: 평일 08:00-22:00"
-                              aria-invalid={Boolean(fieldErrors.operatingHours) || undefined}
-                              aria-describedby={fieldErrors.operatingHours ? "campus-map-operatingHours-error" : undefined}
-                              onChange={(event) => setField("operatingHours", event.target.value)}
-                              required
-                            />
-                            {fieldErrors.operatingHours && <small id="campus-map-operatingHours-error" className={styles.fieldError} role="alert">{fieldErrors.operatingHours}</small>}
-                          </label>
                         </div>
 
                         {([
-                          ["departments", "입주 학과", "예: 항공운항학과"],
                           ["majorFacilities", "주요 시설", "예: 대형 강의실"],
                         ] as const).map(([key, label, placeholder]) => (
                           <div className={styles.repeatField} key={key}>

@@ -2,10 +2,13 @@
 
 import type { IconProps } from "@phosphor-icons/react";
 import {
+  Browser,
   Broadcast,
   Bus,
   CalendarDots,
   CaretRight,
+  DeviceMobile,
+  FlagBanner,
   ImageSquare,
   List,
   MapTrifold,
@@ -25,8 +28,8 @@ import { type ComponentType, useEffect, useState } from "react";
 import {
   ADMIN_SESSION_EVENT,
   type AdminSession,
-  clearAdminSession,
   getAdminSession,
+  requestAdminLogout,
 } from "../lib/auth";
 
 type NavigationItem = {
@@ -54,6 +57,16 @@ const navigation: NavigationGroup[] = [
     items: [{ href: "/", label: "대시보드", icon: SquaresFour }],
   },
   {
+    label: "운영 관리",
+    items: [
+      {
+        href: "/settings/app-updates",
+        label: "앱 업데이트",
+        icon: DeviceMobile,
+      },
+    ],
+  },
+  {
     label: "콘텐츠 운영",
     items: [
       {
@@ -69,6 +82,12 @@ const navigation: NavigationGroup[] = [
       },
       { href: "/calendars/manage", label: "학생회 일정", icon: CalendarDots },
       { href: "/posters/manage", label: "홈 포스터", icon: ImageSquare },
+      { href: "/popups/manage", label: "팝업 관리", icon: Browser },
+      {
+        href: "/settings/festival-floating-button",
+        label: "축제 플로팅 버튼",
+        icon: FlagBanner,
+      },
     ],
   },
   {
@@ -133,8 +152,23 @@ const pageTitles: Record<string, PageInfo> = {
   },
   "/posters/manage": {
     title: "홈 포스터",
-    description: "앱 홈 화면에 사용할 포스터 이미지를 등록하고 관리합니다.",
+    description: "앱 홈 화면에 사용할 포스터 이미지와 클릭 링크를 등록하고 관리합니다.",
     section: "콘텐츠 운영",
+  },
+  "/popups/manage": {
+    title: "팝업 관리",
+    description: "앱에 노출할 팝업의 내용과 게시 기간을 등록하고 관리합니다.",
+    section: "콘텐츠 운영",
+  },
+  "/settings/festival-floating-button": {
+    title: "축제 플로팅 버튼",
+    description: "앱 홈의 대동제 바로가기 버튼 노출 여부를 관리합니다.",
+    section: "콘텐츠 운영",
+  },
+  "/settings/app-updates": {
+    title: "앱 업데이트",
+    description: "iOS와 Android의 최신 빌드, 최소 지원 빌드와 스토어 업데이트 정책을 관리합니다.",
+    section: "운영 관리",
   },
   "/notices/new": {
     title: "학생회 공지 등록",
@@ -251,8 +285,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }, []);
 
   function handleLogout() {
-    clearAdminSession();
-    setAdminSession(null);
+    if (requestAdminLogout()) setAdminSession(null);
   }
 
   if (pathname === "/login") {

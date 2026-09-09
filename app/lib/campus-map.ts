@@ -8,7 +8,7 @@ export const campusOptions = [
 export const categoryOptions = [
   { value: "RESTAURANT", label: "음식점" },
   { value: "CAFE", label: "카페" },
-  { value: "LECTURE_BUILDING", label: "강의실" },
+  { value: "LECTURE_BUILDING", label: "교내시설" },
   { value: "CONVENIENCE_FACILITY", label: "편의시설" },
 ] as const;
 
@@ -30,10 +30,15 @@ export type LectureBuildingDetails = {
   location: string;
   floorCount: number;
   hasElevator: boolean;
-  operatingHours: string;
+  // Read-only: the API derives this list from major-timetable uploads.
   departments: string[];
   majorFacilities: string[];
 };
+
+export type LectureBuildingDetailsRequest = Omit<
+  LectureBuildingDetails,
+  "departments"
+>;
 
 type CampusMapPlaceBase = {
   placeId: number;
@@ -75,7 +80,7 @@ export type CampusMapPlaceRequest =
   | (Omit<CampusMapPlaceRequestBase, "category"> & {
     category: "LECTURE_BUILDING";
     address?: null;
-    lectureBuildingDetails: LectureBuildingDetails;
+    lectureBuildingDetails: LectureBuildingDetailsRequest;
   })
   | (Omit<CampusMapPlaceRequestBase, "category"> & {
     category: NonLectureCampusPlaceCategory;
@@ -104,8 +109,6 @@ export type CampusMapPlaceForm = {
   location: string;
   floorCount: string;
   hasElevator: boolean;
-  operatingHours: string;
-  departments: string[];
   majorFacilities: string[];
 };
 
@@ -121,8 +124,6 @@ export const initialCampusPlaceForm: CampusMapPlaceForm = {
   location: "",
   floorCount: "",
   hasElevator: false,
-  operatingHours: "",
-  departments: [""],
   majorFacilities: [""],
 };
 
@@ -131,9 +132,6 @@ export const emptyCampusMapPlaceForm = initialCampusPlaceForm;
 const campusCodes = new Set<string>(campusOptions.map((option) => option.value));
 const campusPlaceCategories = new Set<string>(
   categoryOptions.map((option) => option.value),
-);
-const categoryNames = new Map<CampusPlaceCategory, string>(
-  categoryOptions.map((option) => [option.value, option.label]),
 );
 const campusMapImageTypes = new Set(["image/jpeg", "image/png", "image/gif"]);
 const decimalCoordinatePattern = /^-?\d+(?:\.\d{1,9})?$/;
@@ -279,7 +277,6 @@ function parseLectureBuildingDetails(value: unknown): LectureBuildingDetails {
     location: requiredResponseString(value.location, 255),
     floorCount: positiveNumber(value.floorCount),
     hasElevator: value.hasElevator,
-    operatingHours: nullableResponseString(value.operatingHours, 255),
     departments: parseStringArray(value.departments),
     majorFacilities: parseStringArray(value.majorFacilities),
   };
@@ -294,11 +291,10 @@ function parseCampusMapPlaceBase(value: unknown): CampusMapPlaceBase {
     invalidCampusMapData();
   }
 
-  const categoryName = requiredResponseString(value.categoryName);
-  const expectedCategoryName = categoryNames.get(value.category);
-  if (categoryName !== expectedCategoryName) {
-    invalidCampusMapData();
-  }
+  // category is the API contract value. categoryName is presentation text and
+  // has changed independently in production (for example, 강의실 -> 교내시설),
+  // so a wording change must not make the entire 200 list unusable.
+  const categoryName = requiredResponseString(value.categoryName).trim();
 
   const imageUrl = nullableResponseString(value.imageUrl, 2_048);
   if (imageUrl && !isHttpUrl(imageUrl)) {
@@ -306,10 +302,6 @@ function parseCampusMapPlaceBase(value: unknown): CampusMapPlaceBase {
   }
 
   const address = optionalResponseString(value.address, 255);
-
-  if (value.category === "LECTURE_BUILDING" && address !== undefined) {
-    invalidCampusMapData();
-  }
 
   return {
     placeId: positiveInteger(value.placeId),
@@ -420,10 +412,6 @@ export function campusMapPlaceDetailToForm(
       ? String(lectureBuildingDetails.floorCount)
       : "",
     hasElevator: lectureBuildingDetails?.hasElevator ?? false,
-    operatingHours: lectureBuildingDetails?.operatingHours ?? "",
-    departments: lectureBuildingDetails?.departments.length
-      ? [...lectureBuildingDetails.departments]
-      : [""],
     majorFacilities: lectureBuildingDetails?.majorFacilities.length
       ? [...lectureBuildingDetails.majorFacilities]
       : [""],
@@ -520,14 +508,6 @@ export function validateCampusPlaceForm(form: CampusMapPlaceForm): string | null
     return "층수는 1 이상으로 입력해 주세요.";
   }
 
-  const operatingHours = form.operatingHours.trim();
-  if (!operatingHours) return "운영시간을 입력해 주세요.";
-  if (operatingHours.length > 255) {
-    return "운영시간은 255자 이하로 입력해 주세요.";
-  }
-
-  const departmentsError = stringArrayFormError(form.departments, "이용 학과");
-  if (departmentsError) return departmentsError;
   return stringArrayFormError(form.majorFacilities, "주요시설");
 }
 
@@ -554,8 +534,6 @@ export function campusPlaceFormToRequest(
         location: form.location.trim(),
         floorCount: Number(form.floorCount.trim()),
         hasElevator: form.hasElevator,
-        operatingHours: form.operatingHours.trim(),
-        departments: form.departments.map((item) => item.trim()),
         majorFacilities: form.majorFacilities.map((item) => item.trim()),
       },
     };
@@ -609,8 +587,6 @@ function requestToForm(request: CampusMapPlaceRequest): CampusMapPlaceForm | nul
       typeof request.lectureBuildingDetails.location !== "string" ||
       typeof request.lectureBuildingDetails.floorCount !== "number" ||
       typeof request.lectureBuildingDetails.hasElevator !== "boolean" ||
-      typeof request.lectureBuildingDetails.operatingHours !== "string" ||
-      !Array.isArray(request.lectureBuildingDetails.departments) ||
       !Array.isArray(request.lectureBuildingDetails.majorFacilities)
     ) {
       return null;
@@ -628,8 +604,6 @@ function requestToForm(request: CampusMapPlaceRequest): CampusMapPlaceForm | nul
       location: request.lectureBuildingDetails.location,
       floorCount: String(request.lectureBuildingDetails.floorCount),
       hasElevator: request.lectureBuildingDetails.hasElevator,
-      operatingHours: request.lectureBuildingDetails.operatingHours,
-      departments: request.lectureBuildingDetails.departments,
       majorFacilities: request.lectureBuildingDetails.majorFacilities,
     };
   }

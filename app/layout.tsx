@@ -9,7 +9,7 @@ export const metadata: Metadata = {
     default: "한서메이트 관리자",
     template: "%s | 한서메이트 관리자",
   },
-  description: "학생회 공지, 시스템 공지, 일정, 버스 시간표, 캠퍼스맵, 홈 포스터, 동아리와 학사 자료를 관리하는 한서메이트 운영 콘솔입니다.",
+  description: "학생회 공지, 시스템 공지, 일정, 버스 시간표, 캠퍼스맵, 홈 포스터, 앱 팝업, 앱 업데이트 정책, 동아리와 학사 자료를 관리하는 한서메이트 운영 콘솔입니다.",
   applicationName: "한서메이트 관리자",
   icons: {
     icon: [
@@ -34,7 +34,7 @@ export const metadata: Metadata = {
     locale: "ko_KR",
     siteName: "한서메이트 관리자",
     title: "한서메이트 관리자",
-    description: "학생회 공지, 시스템 공지, 일정, 버스 시간표, 캠퍼스맵, 홈 포스터, 동아리와 학사 자료 관리",
+    description: "학생회 공지, 시스템 공지, 일정, 버스 시간표, 캠퍼스맵, 홈 포스터, 앱 팝업, 앱 업데이트 정책, 동아리와 학사 자료 관리",
     images: [
       {
         url: "/og.png",
@@ -47,7 +47,7 @@ export const metadata: Metadata = {
   twitter: {
     card: "summary_large_image",
     title: "한서메이트 관리자",
-    description: "학생회 공지, 시스템 공지, 일정, 버스 시간표, 캠퍼스맵, 홈 포스터, 동아리와 학사 자료 관리",
+    description: "학생회 공지, 시스템 공지, 일정, 버스 시간표, 캠퍼스맵, 홈 포스터, 앱 팝업, 앱 업데이트 정책, 동아리와 학사 자료 관리",
     images: ["/og.png"],
   },
 };

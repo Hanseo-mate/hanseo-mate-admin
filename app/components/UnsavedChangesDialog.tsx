@@ -2,15 +2,32 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import {
+  ADMIN_LOGOUT_REQUEST_EVENT,
+  clearAdminSession,
+} from "../lib/auth";
 import { ConfirmDialog } from "./ConfirmDialog";
 
 type UnsavedChangesDialogProps = {
   dirty: boolean;
 };
 
+type PendingExit =
+  | { kind: "navigate"; href: string }
+  | { kind: "logout" }
+  | null;
+
+type TraverseNavigateEvent = Event & {
+  navigationType: string;
+  canIntercept: boolean;
+  hashChange: boolean;
+  destination: { sameDocument: boolean };
+  intercept(options: { precommitHandler: () => Promise<void> }): void;
+};
+
 export function UnsavedChangesDialog({ dirty }: UnsavedChangesDialogProps) {
   const router = useRouter();
-  const [pendingHref, setPendingHref] = useState<string | null>(null);
+  const [pendingExit, setPendingExit] = useState<PendingExit>(null);
 
   useEffect(() => {
     if (!dirty) return;
@@ -40,25 +57,68 @@ export function UnsavedChangesDialog({ dirty }: UnsavedChangesDialogProps) {
       if (current === next) return;
 
       event.preventDefault();
-      setPendingHref(next);
+      setPendingExit({ kind: "navigate", href: next });
     }
 
+    function protectLogout(event: Event) {
+      event.preventDefault();
+      setPendingExit({ kind: "logout" });
+    }
+
+    function warnBeforeLeave(event: BeforeUnloadEvent) {
+      event.preventDefault();
+      event.returnValue = "";
+    }
+
+    const navigation = (window as Window & { navigation?: EventTarget }).navigation;
+    const supportsPrecommit = "NavigationPrecommitController" in window;
+    const protectHistoryTraversal: EventListener = (rawEvent) => {
+      const event = rawEvent as TraverseNavigateEvent;
+      if (
+        event.navigationType !== "traverse" ||
+        !event.destination.sameDocument ||
+        !event.canIntercept ||
+        !event.cancelable ||
+        event.hashChange
+      ) {
+        return;
+      }
+
+      if (window.confirm("저장하지 않은 변경사항을 버리고 이동할까요?")) return;
+      event.intercept({
+        precommitHandler: async () => {
+          throw new DOMException("Navigation cancelled", "AbortError");
+        },
+      });
+    };
+
     document.addEventListener("click", protectInternalNavigation, true);
-    return () => document.removeEventListener("click", protectInternalNavigation, true);
+    window.addEventListener(ADMIN_LOGOUT_REQUEST_EVENT, protectLogout);
+    window.addEventListener("beforeunload", warnBeforeLeave);
+    if (navigation && supportsPrecommit) {
+      navigation.addEventListener("navigate", protectHistoryTraversal);
+    }
+    return () => {
+      document.removeEventListener("click", protectInternalNavigation, true);
+      window.removeEventListener(ADMIN_LOGOUT_REQUEST_EVENT, protectLogout);
+      window.removeEventListener("beforeunload", warnBeforeLeave);
+      navigation?.removeEventListener("navigate", protectHistoryTraversal);
+    };
   }, [dirty]);
 
   return (
     <ConfirmDialog
-      open={Boolean(pendingHref)}
+      open={Boolean(pendingExit)}
       title="저장하지 않은 변경사항이 있습니다."
       description="이 화면을 나가면 입력하거나 선택한 내용이 사라집니다."
       confirmLabel="변경사항 버리기"
       danger
-      onCancel={() => setPendingHref(null)}
+      onCancel={() => setPendingExit(null)}
       onConfirm={() => {
-        const href = pendingHref;
-        setPendingHref(null);
-        if (href) router.push(href);
+        const action = pendingExit;
+        setPendingExit(null);
+        if (action?.kind === "navigate") router.push(action.href);
+        if (action?.kind === "logout") clearAdminSession();
       }}
     />
   );

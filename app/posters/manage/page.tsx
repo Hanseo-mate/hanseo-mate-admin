@@ -2,8 +2,10 @@
 
 import {
   ArrowClockwise,
+  ArrowSquareOut,
   CheckCircle,
   ImageSquare,
+  LinkSimple,
   Plus,
   Trash,
   UploadSimple,
@@ -27,6 +29,7 @@ import styles from "../posters.module.css";
 type Poster = {
   id: number;
   imageUrl: string;
+  linkUrl: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -40,6 +43,7 @@ type Feedback = {
 
 const POSTER_ENDPOINT = "/api/admin/home-posters";
 const MAX_FILE_SIZE = 5 * 1024 * 1024;
+const MAX_LINK_URL_LENGTH = 2_048;
 const ALLOWED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/gif"]);
 const ALLOWED_IMAGE_EXTENSION = /\.(?:jpe?g|png|gif)$/i;
 
@@ -50,17 +54,29 @@ function userFacingError(message: string) {
 }
 
 function parsePoster(value: unknown): Poster {
+  const poster = value as Partial<Poster> | null;
   if (
-    !value ||
-    typeof value !== "object" ||
-    typeof (value as Poster).id !== "number" ||
-    typeof (value as Poster).imageUrl !== "string" ||
-    typeof (value as Poster).createdAt !== "string" ||
-    typeof (value as Poster).updatedAt !== "string"
+    !poster ||
+    typeof poster !== "object" ||
+    !Number.isInteger(poster.id) ||
+    Number(poster.id) < 1 ||
+    typeof poster.imageUrl !== "string" ||
+    !Object.prototype.hasOwnProperty.call(poster, "linkUrl") ||
+    (poster.linkUrl !== null && (
+      typeof poster.linkUrl !== "string" ||
+      normalizeLinkUrl(poster.linkUrl) === null ||
+      validateLinkUrl(poster.linkUrl) !== null
+    )) ||
+    typeof poster.createdAt !== "string" ||
+    typeof poster.updatedAt !== "string"
   ) {
     throw userFacingError("포스터 정보를 확인할 수 없습니다. 잠시 후 다시 불러와 주세요.");
   }
-  return value as Poster;
+  return {
+    ...poster,
+    id: Number(poster.id),
+    linkUrl: poster.linkUrl === null ? null : normalizeLinkUrl(poster.linkUrl as string),
+  } as Poster;
 }
 
 function parsePosters(value: unknown): Poster[] {
@@ -76,6 +92,32 @@ function validateImage(file: File): string | null {
   }
   if (file.size === 0) return "내용이 없는 사진은 등록할 수 없습니다.";
   if (file.size > MAX_FILE_SIZE) return "사진 크기는 5MB 이하여야 합니다.";
+  return null;
+}
+
+function normalizeLinkUrl(value: string): string | null {
+  return value.trim() || null;
+}
+
+function validateLinkUrl(value: string): string | null {
+  const normalized = normalizeLinkUrl(value);
+  if (normalized === null) return null;
+  if (normalized.length > MAX_LINK_URL_LENGTH) {
+    return "클릭 링크는 2,048자 이하로 입력해 주세요.";
+  }
+  if (/[\u0000-\u0020\u007f]/.test(normalized)) {
+    return "공백 없이 올바른 웹 주소를 입력해 주세요.";
+  }
+
+  try {
+    const url = new URL(normalized);
+    if ((url.protocol !== "http:" && url.protocol !== "https:") || !url.hostname) {
+      return "http:// 또는 https://로 시작하는 올바른 웹 주소를 입력해 주세요.";
+    }
+  } catch {
+    return "http:// 또는 https://로 시작하는 올바른 웹 주소를 입력해 주세요.";
+  }
+
   return null;
 }
 
@@ -310,7 +352,9 @@ export default function ManagePosterPage() {
   const [listState, setListState] = useState<LoadState>("idle");
   const [listError, setListError] = useState("");
   const [newFile, setNewFile] = useState<File | null>(null);
+  const [newLinkUrl, setNewLinkUrl] = useState("");
   const [replacementFiles, setReplacementFiles] = useState<Record<number, File | null>>({});
+  const [replacementLinkUrls, setReplacementLinkUrls] = useState<Record<number, string>>({});
   const [dragging, setDragging] = useState(false);
   const [busyAction, setBusyAction] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<Poster | null>(null);
@@ -320,18 +364,22 @@ export default function ManagePosterPage() {
   const newFileInputRef = useRef<HTMLInputElement | null>(null);
   const mutationInProgress = useRef(false);
   const isBusy = Boolean(busyAction);
-  const hasPendingFiles = Boolean(
-    newFile || Object.values(replacementFiles).some(Boolean),
+  const newLinkError = validateLinkUrl(newLinkUrl);
+  const hasPendingChanges = Boolean(
+    newFile ||
+    newLinkUrl ||
+    Object.values(replacementFiles).some(Boolean) ||
+    Object.keys(replacementLinkUrls).length,
   );
 
   useEffect(() => {
-    if (!hasPendingFiles) return;
+    if (!hasPendingChanges) return;
     const warnBeforeLeave = (event: BeforeUnloadEvent) => {
       event.preventDefault();
     };
     window.addEventListener("beforeunload", warnBeforeLeave);
     return () => window.removeEventListener("beforeunload", warnBeforeLeave);
-  }, [hasPendingFiles]);
+  }, [hasPendingChanges]);
 
   const loadPosters = useCallback(async () => {
     listController.current?.abort();
@@ -349,6 +397,7 @@ export default function ManagePosterPage() {
       if (controller.signal.aborted) return;
       setPosters(parsePosters(response));
       setReplacementFiles({});
+      setReplacementLinkUrls({});
       setListState("ready");
     } catch (error) {
       if (controller.signal.aborted) return;
@@ -396,11 +445,35 @@ export default function ManagePosterPage() {
     const error = validateImage(file);
     if (error) {
       setReplacementFiles((current) => ({ ...current, [poster.id]: null }));
+      setReplacementLinkUrls((current) => {
+        const next = { ...current };
+        delete next[poster.id];
+        return next;
+      });
       setFeedback({ tone: "error", title: "이 사진으로 교체할 수 없습니다.", message: error });
       return;
     }
     setReplacementFiles((current) => ({ ...current, [poster.id]: file }));
+    setReplacementLinkUrls((current) => ({
+      ...current,
+      [poster.id]: Object.prototype.hasOwnProperty.call(current, poster.id)
+        ? current[poster.id]
+        : poster.linkUrl ?? "",
+    }));
     setFeedback(null);
+  }
+
+  function clearReplacement(posterId: number) {
+    setReplacementFiles((current) => {
+      const next = { ...current };
+      delete next[posterId];
+      return next;
+    });
+    setReplacementLinkUrls((current) => {
+      const next = { ...current };
+      delete next[posterId];
+      return next;
+    });
   }
 
   function handleDrop(event: DragEvent<HTMLLabelElement>) {
@@ -422,16 +495,23 @@ export default function ManagePosterPage() {
       setFeedback({ tone: "error", title: "사진을 등록할 수 없습니다.", message: error });
       return;
     }
+    if (newLinkError) {
+      setFeedback({ tone: "error", title: "클릭 링크를 확인해 주세요.", message: newLinkError });
+      return;
+    }
 
     mutationInProgress.current = true;
     setBusyAction("create");
     setFeedback(null);
     const body = new FormData();
     body.append("file", newFile, newFile.name);
+    const normalizedLinkUrl = normalizeLinkUrl(newLinkUrl);
+    if (normalizedLinkUrl) body.append("linkUrl", normalizedLinkUrl);
 
     try {
       parsePoster(await apiFetch<unknown>(POSTER_ENDPOINT, { method: "POST", body }));
       setNewFile(null);
+      setNewLinkUrl("");
       if (newFileInputRef.current) newFileInputRef.current.value = "";
       setFeedback({
         tone: "success",
@@ -459,12 +539,20 @@ export default function ManagePosterPage() {
       setFeedback({ tone: "error", title: "사진을 교체할 수 없습니다.", message: error });
       return;
     }
+    const replacementLinkUrl = replacementLinkUrls[poster.id] ?? poster.linkUrl ?? "";
+    const linkError = validateLinkUrl(replacementLinkUrl);
+    if (linkError) {
+      setFeedback({ tone: "error", title: "클릭 링크를 확인해 주세요.", message: linkError });
+      return;
+    }
 
     mutationInProgress.current = true;
     setBusyAction(`replace-${poster.id}`);
     setFeedback(null);
     const body = new FormData();
     body.append("file", file, file.name);
+    const normalizedLinkUrl = normalizeLinkUrl(replacementLinkUrl);
+    if (normalizedLinkUrl) body.append("linkUrl", normalizedLinkUrl);
 
     try {
       parsePoster(await apiFetch<unknown>(`${POSTER_ENDPOINT}/${poster.id}`, {
@@ -473,14 +561,16 @@ export default function ManagePosterPage() {
       }));
       setFeedback({
         tone: "success",
-        title: "포스터 이미지를 교체했습니다.",
-        message: "선택한 새 사진이 관리자 포스터 데이터에 반영되었습니다.",
+        title: "포스터를 교체했습니다.",
+        message: normalizedLinkUrl
+          ? "새 사진과 클릭 링크가 함께 반영되었습니다."
+          : "새 사진을 반영하고 클릭 이동은 사용하지 않도록 설정했습니다.",
       });
       await loadPosters();
     } catch (requestError) {
       setFeedback({
         tone: "error",
-        title: "포스터 이미지를 교체하지 못했습니다.",
+        title: "포스터를 교체하지 못했습니다.",
         message: getErrorText(requestError),
       });
     } finally {
@@ -529,7 +619,7 @@ export default function ManagePosterPage() {
 
   return (
     <AdminLoginNotice returnTo="/posters/manage">
-      <UnsavedChangesDialog dirty={hasPendingFiles} />
+      <UnsavedChangesDialog dirty={hasPendingChanges} />
       <div className={styles.page}>
         {feedback && (
           <div
@@ -556,9 +646,9 @@ export default function ManagePosterPage() {
           <header className={styles.sectionHeader}>
             <div>
               <h2 id="poster-upload-title">포스터 등록</h2>
-              <p>이미지 한 장을 선택하고 미리보기를 확인한 뒤 등록합니다.</p>
+              <p>이미지 한 장과 선택적인 클릭 링크를 함께 등록합니다.</p>
             </div>
-            <span className={styles.limitText}>최대 5MB</span>
+            <span className={styles.limitText}>최대 5 MiB</span>
           </header>
 
           <div className={styles.adminNotice} role="note">
@@ -628,13 +718,51 @@ export default function ManagePosterPage() {
                     <button className="button button-secondary" type="button" onClick={() => setNewFile(null)} disabled={isBusy}>
                       다시 선택
                     </button>
-                    <button className="button button-primary" type="button" onClick={createPoster} disabled={isBusy}>
+                    <button
+                      className="button button-primary"
+                      type="button"
+                      onClick={createPoster}
+                      disabled={isBusy || Boolean(newLinkError)}
+                    >
                       <Plus size={16} aria-hidden="true" />
                       {busyAction === "create" ? "등록 중..." : "포스터 등록"}
                     </button>
                   </div>
                 </div>
               )}
+
+              <div className={styles.linkEditor}>
+                <div className={styles.fieldHeading}>
+                  <label htmlFor="new-poster-link">클릭 링크 <span>선택</span></label>
+                  <small>{newLinkUrl.length.toLocaleString("ko-KR")} / 2,048</small>
+                </div>
+                <div className={`${styles.linkInput} ${newLinkError ? styles.linkInputError : ""}`}>
+                  <LinkSimple size={17} aria-hidden="true" />
+                  <input
+                    id="new-poster-link"
+                    type="url"
+                    inputMode="url"
+                    autoCapitalize="none"
+                    autoComplete="url"
+                    spellCheck={false}
+                    value={newLinkUrl}
+                    maxLength={MAX_LINK_URL_LENGTH}
+                    placeholder="https://www.hanseo.ac.kr/event/1"
+                    disabled={isBusy}
+                    aria-invalid={Boolean(newLinkError) || undefined}
+                    aria-describedby={`new-poster-link-help${newLinkError ? " new-poster-link-error" : ""}`}
+                    onChange={(event) => setNewLinkUrl(event.target.value)}
+                  />
+                </div>
+                <small id="new-poster-link-help" className={styles.fieldHelp}>
+                  비워두면 포스터 사진만 표시되고, 클릭해도 이동하지 않습니다.
+                </small>
+                {newLinkError && (
+                  <small id="new-poster-link-error" className={styles.fieldError} role="alert">
+                    {newLinkError}
+                  </small>
+                )}
+              </div>
             </div>
 
             <aside className={styles.rulesPanel} aria-labelledby="poster-file-rules">
@@ -646,7 +774,11 @@ export default function ManagePosterPage() {
                 </div>
                 <div>
                   <dt>파일 크기</dt>
-                  <dd>한 장당 5MB 이하</dd>
+                  <dd>한 장당 5 MiB 이하</dd>
+                </div>
+                <div>
+                  <dt>클릭 링크</dt>
+                  <dd>HTTP/HTTPS, 선택 입력</dd>
                 </div>
                 <div>
                   <dt>등록 단위</dt>
@@ -666,13 +798,14 @@ export default function ManagePosterPage() {
                   {listState === "ready" ? `${posters.length}장` : "확인 중"}
                 </span>
               </div>
-              <p>등록 순서대로 사진과 변경 이력을 확인하고 교체하거나 삭제할 수 있습니다.</p>
+              <p>등록 순서대로 사진과 클릭 링크를 확인하고 함께 교체하거나 삭제할 수 있습니다.</p>
             </div>
             <button
               className="button button-secondary"
               type="button"
               onClick={() => void loadPosters()}
-              disabled={isBusy || listState === "loading"}
+              disabled={isBusy || listState === "loading" || hasPendingChanges}
+              title={hasPendingChanges ? "저장하지 않은 입력을 먼저 완료하거나 취소해 주세요." : undefined}
             >
               <ArrowClockwise size={16} aria-hidden="true" />
               {listState === "loading" ? "불러오는 중..." : "새로고침"}
@@ -711,6 +844,8 @@ export default function ManagePosterPage() {
               <div className={styles.gallery}>
                 {posters.map((poster) => {
                   const replacementFile = replacementFiles[poster.id];
+                  const replacementLinkUrl = replacementLinkUrls[poster.id] ?? poster.linkUrl ?? "";
+                  const replacementLinkError = validateLinkUrl(replacementLinkUrl);
                   const replacing = busyAction === `replace-${poster.id}`;
                   const deleting = busyAction === `delete-${poster.id}`;
                   return (
@@ -744,6 +879,28 @@ export default function ManagePosterPage() {
                           </div>
                         </dl>
 
+                        <div className={styles.linkStatus}>
+                          <span className={styles.linkStatusIcon} aria-hidden="true">
+                            <LinkSimple size={16} />
+                          </span>
+                          <div>
+                            <strong>{poster.linkUrl ? "링크 있음" : "링크 없음"}</strong>
+                            {poster.linkUrl ? (
+                              <a
+                                href={poster.linkUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                title={poster.linkUrl}
+                              >
+                                <span>{poster.linkUrl}</span>
+                                <ArrowSquareOut size={14} aria-hidden="true" />
+                              </a>
+                            ) : (
+                              <span>클릭 이동 없음</span>
+                            )}
+                          </div>
+                        </div>
+
                         {replacementFile ? (
                           <div className={styles.replacementPanel}>
                             <div className={styles.replacementHeading}>
@@ -772,24 +929,64 @@ export default function ManagePosterPage() {
                               <strong>{replacementFile.name}</strong>
                               <span>{formatFileSize(replacementFile.size)}</span>
                             </div>
+                            <div className={styles.linkEditor}>
+                              <div className={styles.fieldHeading}>
+                                <label htmlFor={`replacement-link-${poster.id}`}>교체 후 클릭 링크 <span>선택</span></label>
+                                <small>{replacementLinkUrl.length.toLocaleString("ko-KR")} / 2,048</small>
+                              </div>
+                              <div className={`${styles.linkInput} ${replacementLinkError ? styles.linkInputError : ""}`}>
+                                <LinkSimple size={16} aria-hidden="true" />
+                                <input
+                                  id={`replacement-link-${poster.id}`}
+                                  type="url"
+                                  inputMode="url"
+                                  autoCapitalize="none"
+                                  autoComplete="url"
+                                  spellCheck={false}
+                                  value={replacementLinkUrl}
+                                  maxLength={MAX_LINK_URL_LENGTH}
+                                  placeholder="https://www.hanseo.ac.kr/event/1"
+                                  disabled={isBusy}
+                                  aria-invalid={Boolean(replacementLinkError) || undefined}
+                                  aria-describedby={`replacement-link-${poster.id}-help${replacementLinkError ? ` replacement-link-${poster.id}-error` : ""}`}
+                                  onChange={(event) => setReplacementLinkUrls((current) => ({
+                                    ...current,
+                                    [poster.id]: event.target.value,
+                                  }))}
+                                />
+                              </div>
+                              <small id={`replacement-link-${poster.id}-help`} className={styles.fieldHelp}>
+                                비워두면 기존 링크를 제거하고 클릭 이동을 사용하지 않습니다.
+                              </small>
+                              {replacementLinkError && (
+                                <small id={`replacement-link-${poster.id}-error`} className={styles.fieldError} role="alert">
+                                  {replacementLinkError}
+                                </small>
+                              )}
+                            </div>
                             <div className={styles.cardActions}>
                               <button
                                 className="button button-secondary"
                                 type="button"
-                                onClick={() => setReplacementFiles((current) => ({ ...current, [poster.id]: null }))}
+                                onClick={() => clearReplacement(poster.id)}
                                 disabled={isBusy}
                               >
                                 선택 취소
                               </button>
-                              <button className="button button-primary" type="button" onClick={() => void replacePoster(poster)} disabled={isBusy}>
-                                {replacing ? "교체 중..." : "선택한 사진으로 교체"}
+                              <button
+                                className="button button-primary"
+                                type="button"
+                                onClick={() => void replacePoster(poster)}
+                                disabled={isBusy || Boolean(replacementLinkError)}
+                              >
+                                {replacing ? "교체 중..." : "사진과 링크 교체"}
                               </button>
                             </div>
                           </div>
                         ) : (
                           <div className={styles.cardActions}>
                             <label className={`button button-secondary ${styles.fileButton} ${isBusy ? styles.disabled : ""}`}>
-                              이미지 교체
+                              이미지·링크 교체
                               <input
                                 type="file"
                                 accept=".jpg,.jpeg,.png,.gif,image/jpeg,image/png,image/gif"
@@ -802,6 +999,9 @@ export default function ManagePosterPage() {
                               <Trash size={16} aria-hidden="true" />
                               {deleting ? "삭제 중..." : "삭제"}
                             </button>
+                            <small className={styles.replacementNote}>
+                              링크 변경이나 제거에도 새 사진 선택이 필요합니다.
+                            </small>
                           </div>
                         )}
                       </div>

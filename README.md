@@ -1,6 +1,6 @@
 # 한서메이트 관리자
 
-학생회 공지, 시스템 공지, 일정, 버스 시간표, 캠퍼스맵, 홈 포스터, 동아리와 학사 자료를 관리하는 한서메이트 운영 콘솔입니다.
+학생회 공지, 시스템 공지, 일정, 버스 시간표, 캠퍼스맵, 홈 포스터, 앱 팝업, 앱 업데이트 정책, 동아리와 학사 자료를 관리하는 한서메이트 운영 콘솔입니다.
 
 ## 화면
 
@@ -11,7 +11,10 @@
 - `/calendars/manage` 학생회 일정 월간 조회·등록·수정·삭제
 - `/bus-schedules/manage` 버스 시간표 조회·등록·교체
 - `/campus-map/manage` 캠퍼스 장소 조회·등록·전체수정·삭제
-- `/posters/manage` 홈 포스터 등록·교체·삭제
+- `/posters/manage` 홈 포스터 이미지·클릭 링크 등록·교체·삭제
+- `/popups/manage` 앱 팝업 조회·등록·수정·삭제
+- `/settings/festival-floating-button` 앱 홈의 대동제 플로팅 버튼 노출 제어
+- `/settings/app-updates` iOS·Android 스토어 앱 업데이트 정책 조회·초안·게시·예약·롤백·감사 이력
 - `/clubs/manage` 동아리 목록·상세·소개·이미지 관리
 - `/clubs/new` 동아리 기본 등록
 - `/courses/major` 전공 강의시간표 Excel 업로드

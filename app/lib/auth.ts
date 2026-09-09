@@ -1,4 +1,5 @@
 export const ADMIN_SESSION_EVENT = "hsmate-admin-session-change";
+export const ADMIN_LOGOUT_REQUEST_EVENT = "hsmate-admin-logout-request";
 
 const ADMIN_SESSION_KEY = "hsmate-admin-session";
 
@@ -92,6 +93,16 @@ export function saveAdminSession(response: AdminLoginResponse): AdminSession {
 export function clearAdminSession() {
   removeStoredSession();
   notifySessionChange();
+}
+
+export function requestAdminLogout() {
+  if (typeof window !== "undefined") {
+    const request = new Event(ADMIN_LOGOUT_REQUEST_EVENT, { cancelable: true });
+    if (!window.dispatchEvent(request)) return false;
+  }
+
+  clearAdminSession();
+  return true;
 }
 
 export function getAdminAccessToken() {

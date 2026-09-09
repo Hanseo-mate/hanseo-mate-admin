@@ -93,6 +93,9 @@
 }
 
 .uploadWorkspace {
+  display: grid;
+  gap: 14px;
+  align-content: start;
   min-width: 0;
 }
 
@@ -252,6 +255,99 @@
   margin-top: 3px;
   color: var(--ink-500);
   font-size: 11px;
+}
+
+.linkEditor {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: #ffffff;
+}
+
+.fieldHeading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.fieldHeading label {
+  color: var(--ink-900);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.fieldHeading label span {
+  margin-left: 4px;
+  color: var(--ink-500);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.fieldHeading small {
+  color: var(--ink-500);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.linkInput {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  min-height: 40px;
+  padding: 0 10px;
+  border: 1px solid #b8c0cc;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.linkInput:focus-within {
+  border-color: var(--brand-primary);
+  box-shadow: 0 0 0 3px rgba(49, 86, 211, 0.14);
+}
+
+.linkInput > svg {
+  color: var(--ink-500);
+}
+
+.linkInput input {
+  width: 100%;
+  min-width: 0;
+  height: 38px;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  color: var(--ink-900);
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+}
+
+.linkInput input::placeholder {
+  color: #98a2b3;
+}
+
+.linkInputError {
+  border-color: var(--danger);
+}
+
+.fieldHelp,
+.fieldError {
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.fieldHelp {
+  color: var(--ink-500);
+}
+
+.fieldError {
+  color: var(--danger);
 }
 
 .iconButton {
@@ -472,6 +568,73 @@
   font-weight: 600;
 }
 
+.linkStatus {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 9px;
+  align-items: start;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.linkStatusIcon {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border-radius: 7px;
+  color: var(--brand-primary);
+  background: #eef2ff;
+}
+
+.linkStatus > div {
+  min-width: 0;
+}
+
+.linkStatus strong,
+.linkStatus > div > span {
+  display: block;
+}
+
+.linkStatus strong {
+  color: var(--ink-900);
+  font-size: 11px;
+}
+
+.linkStatus > div > span {
+  margin-top: 3px;
+  color: var(--ink-500);
+  font-size: 10px;
+}
+
+.linkStatus a {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 5px;
+  margin-top: 3px;
+  color: var(--brand-primary);
+  font-size: 10px;
+  text-decoration: none;
+}
+
+.linkStatus a:hover {
+  text-decoration: underline;
+}
+
+.linkStatus a span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.linkStatus a svg {
+  flex: 0 0 auto;
+}
+
 .cardActions {
   margin-top: auto;
 }
@@ -530,6 +693,18 @@
   border: 1px solid #d9dff5;
   border-radius: 9px;
   background: #f8f9ff;
+}
+
+.replacementPanel .linkEditor {
+  background: #ffffff;
+}
+
+.replacementNote {
+  flex: 1 0 100%;
+  color: var(--ink-500);
+  font-size: 10px;
+  line-height: 1.45;
+  text-align: right;
 }
 
 .replacementHeading {
@@ -814,7 +989,7 @@
   }
 
   .rulesPanel dl {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 12px;
   }
 

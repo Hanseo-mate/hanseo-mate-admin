@@ -88,7 +88,7 @@ function collectPosterRequests(source) {
   return requests;
 }
 
-function findPosterResponseFields(source) {
+function findPosterResponseShapes(source) {
   const sourceFile = ts.createSourceFile(
     pageUrl.pathname,
     source,
@@ -99,17 +99,23 @@ function findPosterResponseFields(source) {
   const candidates = [];
 
   function collectProperties(node) {
-    const names = node.members
+    const properties = node.members
       .filter(ts.isPropertySignature)
-      .map((property) => property.name)
-      .filter(Boolean)
-      .map((name) => {
-        if (ts.isIdentifier(name) || ts.isStringLiteral(name)) return name.text;
-        return name.getText(sourceFile);
+      .map((property) => {
+        const name = property.name;
+        const propertyName = ts.isIdentifier(name) || ts.isStringLiteral(name)
+          ? name.text
+          : name.getText(sourceFile);
+        return {
+          name: propertyName,
+          optional: Boolean(property.questionToken),
+          type: property.type?.getText(sourceFile) ?? "",
+        };
       });
+    const names = properties.map((property) => property.name);
 
     if (names.includes("id") && names.includes("imageUrl")) {
-      candidates.push(names);
+      candidates.push(properties);
     }
   }
 
@@ -128,6 +134,252 @@ function findPosterResponseFields(source) {
     "id와 imageUrl을 가진 포스터 응답 타입이 필요합니다.",
   );
   return candidates;
+}
+
+function findNamedFunction(source, functionName) {
+  const sourceFile = ts.createSourceFile(
+    pageUrl.pathname,
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TSX,
+  );
+  let match;
+
+  function visit(node) {
+    if (ts.isFunctionDeclaration(node) && node.name?.text === functionName) {
+      match = node;
+      return;
+    }
+    ts.forEachChild(node, visit);
+  }
+
+  visit(sourceFile);
+  assert.ok(match, `${functionName} 함수가 필요합니다.`);
+  return { node: match, sourceFile, text: match.getText(sourceFile) };
+}
+
+function collectMultipartFields(source, functionName) {
+  const { node: functionNode, sourceFile } = findNamedFunction(source, functionName);
+  const formDataNames = new Set();
+  const fields = [];
+
+  function visit(node) {
+    if (
+      ts.isVariableDeclaration(node) &&
+      ts.isIdentifier(node.name) &&
+      node.initializer &&
+      ts.isNewExpression(node.initializer) &&
+      ts.isIdentifier(node.initializer.expression) &&
+      node.initializer.expression.text === "FormData"
+    ) {
+      formDataNames.add(node.name.text);
+    }
+
+    if (
+      ts.isCallExpression(node) &&
+      ts.isPropertyAccessExpression(node.expression) &&
+      ts.isIdentifier(node.expression.expression) &&
+      formDataNames.has(node.expression.expression.text) &&
+      ["append", "set"].includes(node.expression.name.text) &&
+      node.arguments[0] &&
+      (ts.isStringLiteral(node.arguments[0]) || ts.isNoSubstitutionTemplateLiteral(node.arguments[0]))
+    ) {
+      let ancestor = node.parent;
+      let conditional = false;
+      while (ancestor && ancestor !== functionNode) {
+        if (
+          ts.isIfStatement(ancestor) ||
+          ts.isConditionalExpression(ancestor) ||
+          (ts.isBinaryExpression(ancestor) && ancestor.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken)
+        ) {
+          conditional = true;
+          break;
+        }
+        ancestor = ancestor.parent;
+      }
+      fields.push({
+        key: node.arguments[0].text,
+        value: node.arguments[1]?.getText(sourceFile) ?? "",
+        conditional,
+      });
+    }
+    ts.forEachChild(node, visit);
+  }
+
+  visit(functionNode);
+  return fields;
+}
+
+function evaluateNumericExpression(node) {
+  if (ts.isNumericLiteral(node)) return Number(node.text.replaceAll("_", ""));
+  if (ts.isParenthesizedExpression(node)) return evaluateNumericExpression(node.expression);
+  if (ts.isBinaryExpression(node)) {
+    const left = evaluateNumericExpression(node.left);
+    const right = evaluateNumericExpression(node.right);
+    if (node.operatorToken.kind === ts.SyntaxKind.AsteriskToken) return left * right;
+    if (node.operatorToken.kind === ts.SyntaxKind.PlusToken) return left + right;
+  }
+  throw new Error(`숫자 상수 표현식을 계산할 수 없습니다: ${node.getText()}`);
+}
+
+function readNumericConstant(source, constantName) {
+  const sourceFile = ts.createSourceFile(
+    pageUrl.pathname,
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TSX,
+  );
+  let initializer;
+
+  function visit(node) {
+    if (
+      ts.isVariableDeclaration(node) &&
+      ts.isIdentifier(node.name) &&
+      node.name.text === constantName &&
+      node.initializer
+    ) {
+      initializer = node.initializer;
+      return;
+    }
+    ts.forEachChild(node, visit);
+  }
+
+  visit(sourceFile);
+  assert.ok(initializer, `${constantName} 상수가 필요합니다.`);
+  return evaluateNumericExpression(initializer);
+}
+
+function collectUseStateNames(source) {
+  const sourceFile = ts.createSourceFile(
+    pageUrl.pathname,
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TSX,
+  );
+  const names = [];
+
+  function visit(node) {
+    if (
+      ts.isVariableDeclaration(node) &&
+      ts.isArrayBindingPattern(node.name) &&
+      node.initializer &&
+      ts.isCallExpression(node.initializer) &&
+      ts.isIdentifier(node.initializer.expression) &&
+      node.initializer.expression.text === "useState"
+    ) {
+      const stateName = node.name.elements[0]?.name;
+      if (stateName && ts.isIdentifier(stateName)) names.push(stateName.text);
+    }
+    ts.forEachChild(node, visit);
+  }
+
+  visit(sourceFile);
+  return names;
+}
+
+function collectNamedFunctionTexts(source, namePattern) {
+  const sourceFile = ts.createSourceFile(
+    pageUrl.pathname,
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TSX,
+  );
+  const functions = [];
+
+  function visit(node) {
+    if (
+      ts.isFunctionDeclaration(node) &&
+      node.name &&
+      namePattern.test(node.name.text)
+    ) {
+      functions.push(node.getText(sourceFile));
+    }
+    ts.forEachChild(node, visit);
+  }
+
+  visit(sourceFile);
+  return functions;
+}
+
+function findDirtyExpression(source) {
+  const sourceFile = ts.createSourceFile(
+    pageUrl.pathname,
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TSX,
+  );
+  const initializers = new Map();
+  let dirtyExpression = "";
+
+  function visit(node) {
+    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer) {
+      initializers.set(node.name.text, node.initializer.getText(sourceFile));
+    }
+    if (
+      ts.isJsxSelfClosingElement(node) &&
+      ts.isIdentifier(node.tagName) &&
+      node.tagName.text === "UnsavedChangesDialog"
+    ) {
+      const dirtyAttribute = node.attributes.properties.find(
+        (property) => ts.isJsxAttribute(property) && property.name.text === "dirty",
+      );
+      if (
+        dirtyAttribute &&
+        ts.isJsxAttribute(dirtyAttribute) &&
+        dirtyAttribute.initializer &&
+        ts.isJsxExpression(dirtyAttribute.initializer) &&
+        dirtyAttribute.initializer.expression
+      ) {
+        dirtyExpression = dirtyAttribute.initializer.expression.getText(sourceFile);
+      }
+    }
+    ts.forEachChild(node, visit);
+  }
+
+  visit(sourceFile);
+  assert.ok(dirtyExpression, "이탈 확인 다이얼로그에 dirty 조건을 연결해야 합니다.");
+  return initializers.get(dirtyExpression) ?? dirtyExpression;
+}
+
+function collectInputElementsByType(source, inputType) {
+  const sourceFile = ts.createSourceFile(
+    pageUrl.pathname,
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TSX,
+  );
+  const inputs = [];
+
+  function visit(node) {
+    if (
+      ts.isJsxSelfClosingElement(node) &&
+      ts.isIdentifier(node.tagName) &&
+      node.tagName.text === "input"
+    ) {
+      const typeAttribute = node.attributes.properties.find(
+        (property) => ts.isJsxAttribute(property) && property.name.text === "type",
+      );
+      if (
+        typeAttribute &&
+        ts.isJsxAttribute(typeAttribute) &&
+        typeAttribute.initializer &&
+        ts.isStringLiteral(typeAttribute.initializer) &&
+        typeAttribute.initializer.text === inputType
+      ) {
+        inputs.push(node.getText(sourceFile));
+      }
+    }
+    ts.forEachChild(node, visit);
+  }
+
+  visit(sourceFile);
+  return inputs;
 }
 
 function collectUserFacingCopy(source) {
@@ -170,23 +422,69 @@ test("protects the poster screen and covers the complete administrator CRUD flow
   assert.ok(requests.some((request) => request.path.startsWith(`${endpoint}/`) && request.method === "DELETE"));
 });
 
-test("uploads poster images as browser-managed multipart form data", async () => {
+test("uploads poster images and optional normalized links as browser-managed multipart form data", async () => {
   const source = await readPosterPage();
-  const formDataKeys = [...source.matchAll(
-    /\.(?:append|set)\(\s*["'`]([^"'`]+)["'`]\s*,/g,
-  )].map((match) => match[1]);
+  for (const functionName of ["createPoster", "replacePoster"]) {
+    const fields = collectMultipartFields(source, functionName);
+    const fileField = fields.find((field) => field.key === "file");
+    const linkField = fields.find((field) => field.key === "linkUrl");
 
-  assert.ok(formDataKeys.length >= 1, "이미지 업로드용 FormData가 필요합니다.");
-  assert.deepEqual([...new Set(formDataKeys)], ["file"]);
+    assert.ok(fileField, `${functionName}은 file을 multipart 본문에 포함해야 합니다.`);
+    assert.equal(fileField.conditional, false, `${functionName}의 file은 필수 필드여야 합니다.`);
+    assert.ok(linkField, `${functionName}은 선택한 linkUrl을 multipart 본문에 포함해야 합니다.`);
+    assert.equal(linkField.conditional, true, "빈 링크는 linkUrl 필드를 보내지 않아야 합니다.");
+    assert.match(
+      linkField.value,
+      /(?:normalized|trimmed)/i,
+      "linkUrl에는 앞뒤 공백을 정리한 값을 보내야 합니다.",
+    );
+  }
 
   for (const extension of [".jpg", ".jpeg", ".png", ".gif"]) {
     assert.ok(source.includes(extension), `${extension} 파일 지원이 필요합니다.`);
   }
-  assert.match(source, /(?:5\s*\*\s*1024\s*\*\s*1024|5_?242_?880|5242880)/);
+  assert.equal(readNumericConstant(source, "MAX_FILE_SIZE"), 5_242_880);
   assert.match(source, /\.size\s*>\s*[A-Z_$][\w$]*/);
 
   assert.doesNotMatch(source, /["']Content-Type["']\s*:/i);
   assert.doesNotMatch(source, /\.set\(\s*["']Content-Type["']/i);
+});
+
+test("keeps replacement as a file-required PUT and exposes no link-only mutation endpoint", async () => {
+  const source = await readPosterPage();
+  const { text: replaceSource } = findNamedFunction(source, "replacePoster");
+  const requests = collectPosterRequests(source);
+
+  assert.match(replaceSource, /const\s+file\s*=\s*replacementFiles\s*\[/);
+  assert.match(replaceSource, /if\s*\(\s*!file\b/);
+  assert.match(replaceSource, /\.(?:append|set)\(\s*["']file["']/);
+  assert.ok(
+    requests.some((request) => request.method === "PUT" && request.hasBody),
+    "포스터 교체는 multipart 본문이 있는 PUT이어야 합니다.",
+  );
+  assert.equal(
+    requests.some((request) => request.method === "PATCH"),
+    false,
+    "링크만 수정하는 별도 endpoint를 만들지 않습니다.",
+  );
+});
+
+test("normalizes optional poster links and accepts only absolute HTTP(S) URLs up to 2,048 characters", async () => {
+  const source = await readPosterPage();
+  const linkFunctions = collectNamedFunctionTexts(source, /link/i).join("\n");
+
+  assert.ok(linkFunctions, "포스터 링크 정규화·검증 함수가 필요합니다.");
+  assert.match(linkFunctions, /\.trim\s*\(\s*\)/, "링크의 앞뒤 공백을 제거해야 합니다.");
+  assert.match(linkFunctions, /new\s+URL\s*\(/, "절대 URL 파싱으로 링크를 검증해야 합니다.");
+  assert.match(linkFunctions, /["']http:["']/);
+  assert.match(linkFunctions, /["']https:["']/);
+  assert.match(linkFunctions, /\.hostname\b/, "유효한 호스트가 있는 URL만 허용해야 합니다.");
+  assert.match(linkFunctions, /\.length\s*>\s*(?:MAX_[A-Z_]*LINK[A-Z_]*|2_?048|2048)/);
+  assert.match(
+    linkFunctions,
+    /if\s*\(\s*(?:!\s*[A-Za-z_$][\w$]*|[A-Za-z_$][\w$]*\s*===\s*null)\s*\)\s*(?:\{|return)/,
+    "빈 링크는 오류가 아닌 링크 없음으로 처리해야 합니다.",
+  );
 });
 
 test("creates poster preview URLs inside an effect and revokes the effect-owned URL", async () => {
@@ -298,19 +596,88 @@ test("resets both poster file inputs and connects new and replacement files to p
   assert.match(source, /onChange=\{\(event\)\s*=>\s*chooseReplacement\(/);
 });
 
-test("uses only the documented poster response fields and avoids developer-facing copy", async () => {
+test("requires linkUrl on every administrator poster response and avoids developer-facing copy", async () => {
   const source = await readPosterPage();
-  const responseShapes = findPosterResponseFields(source);
+  const responseShapes = findPosterResponseShapes(source);
 
-  for (const responseFields of responseShapes) {
+  for (const responseProperties of responseShapes) {
+    const responseFields = responseProperties.map((property) => property.name);
     assert.deepEqual(
       [...responseFields].sort(),
-      ["createdAt", "id", "imageUrl", "updatedAt"].sort(),
+      ["createdAt", "id", "imageUrl", "linkUrl", "updatedAt"].sort(),
+    );
+    const linkProperty = responseProperties.find((property) => property.name === "linkUrl");
+    assert.ok(linkProperty, "포스터 응답은 linkUrl을 생략하지 않아야 합니다.");
+    assert.equal(linkProperty.optional, false, "linkUrl 필드는 항상 존재해야 합니다.");
+    assert.match(
+      linkProperty.type.replaceAll(/\s/g, ""),
+      /^(?:string\|null|null\|string)$/,
+      "linkUrl은 string | null이어야 합니다.",
     );
   }
+
+  const { text: parserSource } = findNamedFunction(source, "parsePoster");
+  assert.match(parserSource, /\.linkUrl\b/, "응답 파서가 linkUrl을 검증해야 합니다.");
+  assert.match(parserSource, /typeof[\s\S]*?\.linkUrl\s*!==\s*["']string["']/);
+  assert.match(parserSource, /\.linkUrl\s*!==\s*null/);
+
   const userFacingCopy = collectUserFacingCopy(source);
   assert.doesNotMatch(userFacingCopy, /\b(?:API|JWT)\b/);
   assert.doesNotMatch(userFacingCopy, /포스터\s*(?:ID|아이디|번호)/i);
+});
+
+test("shows poster link status and provides separate registration and replacement link drafts", async () => {
+  const source = await readPosterPage();
+  const urlInputs = collectInputElementsByType(source, "url");
+
+  assert.equal(urlInputs.length, 2, "신규 등록과 교체 영역에 링크 URL 입력이 각각 필요합니다.");
+  for (const input of urlInputs) {
+    assert.match(input, /maxLength=\{(?:MAX_[A-Z_]*LINK[A-Z_]*|2_?048|2048)\}/);
+    assert.match(input, /value=\{/);
+    assert.match(input, /onChange=\{/);
+  }
+
+  assert.match(source, /poster\.linkUrl\b/, "등록된 URL을 포스터 카드에 표시해야 합니다.");
+  assert.match(source, /클릭 이동 없음/, "링크가 없는 포스터를 명확히 표시해야 합니다.");
+  assert.match(source, /링크 있음/);
+  assert.match(source, /링크 없음/);
+});
+
+test("includes both new and replacement link drafts in unsaved-change protection", async () => {
+  const source = await readPosterPage();
+  const linkStateNames = collectUseStateNames(source).filter((name) => /link/i.test(name));
+  const dirtyExpression = findDirtyExpression(source);
+
+  assert.ok(linkStateNames.length >= 2, "신규 등록과 교체용 링크 draft 상태가 각각 필요합니다.");
+  const newLinkStateNames = linkStateNames.filter((name) => /^new/i.test(name));
+  assert.ok(newLinkStateNames.length >= 1, "신규 포스터 링크 draft 상태가 필요합니다.");
+  for (const stateName of newLinkStateNames) {
+    assert.match(
+      dirtyExpression,
+      new RegExp(`\\b${stateName}\\b`),
+      `${stateName}을 저장 전 이탈 방지 조건에 포함해야 합니다.`,
+    );
+  }
+
+  const replacementLinkStateNames = linkStateNames.filter((name) => !/^new/i.test(name));
+  assert.ok(replacementLinkStateNames.length >= 1, "교체용 링크 draft 상태가 필요합니다.");
+  const replacementIsDirectlyDirty = replacementLinkStateNames.some((stateName) => (
+    new RegExp(`\\b${stateName}\\b`).test(dirtyExpression)
+  ));
+  if (!replacementIsDirectlyDirty) {
+    assert.match(
+      dirtyExpression,
+      /\breplacementFiles\b/,
+      "교체 링크 draft가 사진 선택 상태와 함께 이탈 방지에 포함되어야 합니다.",
+    );
+    const { text: chooseReplacementSource } = findNamedFunction(source, "chooseReplacement");
+    const { text: clearReplacementSource } = findNamedFunction(source, "clearReplacement");
+    for (const stateName of replacementLinkStateNames) {
+      const setterName = `set${stateName[0].toUpperCase()}${stateName.slice(1)}`;
+      assert.match(chooseReplacementSource, new RegExp(`\\b${setterName}\\b`));
+      assert.match(clearReplacementSource, new RegExp(`\\b${setterName}\\b`));
+    }
+  }
 });
 
 test("automatically adds the saved administrator token without overriding FormData headers", () => {

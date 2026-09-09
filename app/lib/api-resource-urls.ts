@@ -20,17 +20,25 @@ export function normalizeApiResourceUrl(value: string, apiBaseUrl: string): stri
   return `${apiBaseUrl}${url.pathname}${url.search}${url.hash}`;
 }
 
-export function normalizeApiPayload(value: unknown, apiBaseUrl: string): unknown {
-  if (typeof value === "string") return normalizeApiResourceUrl(value, apiBaseUrl);
+export function normalizeApiPayload(
+  value: unknown,
+  apiBaseUrl: string,
+  fieldName?: string,
+): unknown {
+  // Click destinations are user data, not API-hosted assets. Rewriting them
+  // would silently change where a poster sends the user.
+  if (typeof value === "string") {
+    return fieldName === "linkUrl" ? value : normalizeApiResourceUrl(value, apiBaseUrl);
+  }
   if (Array.isArray(value)) {
-    return value.map((entry) => normalizeApiPayload(entry, apiBaseUrl));
+    return value.map((entry) => normalizeApiPayload(entry, apiBaseUrl, fieldName));
   }
   if (!value || typeof value !== "object") return value;
 
   return Object.fromEntries(
     Object.entries(value).map(([key, entry]) => [
       key,
-      normalizeApiPayload(entry, apiBaseUrl),
+      normalizeApiPayload(entry, apiBaseUrl, key),
     ]),
   );
 }

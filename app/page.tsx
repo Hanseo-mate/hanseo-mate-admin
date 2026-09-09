@@ -44,6 +44,7 @@ type CalendarItem = {
 type Poster = {
   id: number;
   imageUrl: string;
+  linkUrl: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -132,6 +133,8 @@ function parsePosters(value: unknown): Poster[] {
       !Number.isInteger(entry.id) ||
       Number(entry.id) < 1 ||
       typeof entry.imageUrl !== "string" ||
+      !Object.prototype.hasOwnProperty.call(entry, "linkUrl") ||
+      (entry.linkUrl !== null && typeof entry.linkUrl !== "string") ||
       typeof entry.createdAt !== "string" ||
       typeof entry.updatedAt !== "string"
     ) {
@@ -141,6 +144,7 @@ function parsePosters(value: unknown): Poster[] {
     return {
       id: Number(entry.id),
       imageUrl: entry.imageUrl,
+      linkUrl: entry.linkUrl,
       createdAt: entry.createdAt,
       updatedAt: entry.updatedAt,
     };
