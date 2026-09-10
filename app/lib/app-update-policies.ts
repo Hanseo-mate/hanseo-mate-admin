@@ -12,10 +12,23 @@ export const APP_UPDATE_POLICY_STATUSES = [
   "CANCELLED",
 ] as const;
 export const APP_UPDATE_ACTIONS = ["NONE", "OPTIONAL", "REQUIRED"] as const;
+export const APP_UPDATE_AUDIT_EVENT_TYPES = [
+  "CREATE",
+  "UPDATE",
+  "PUBLISH",
+  "SCHEDULE",
+  "ACTIVATE",
+  "CANCEL",
+  "ROLLBACK",
+  "RELAX",
+] as const;
+export const APP_UPDATE_POLICY_VALIDATION_MODES = ["STANDARD", "RELAX_DRAFT"] as const;
 
 export type AppPlatform = typeof APP_UPDATE_PLATFORMS[number];
 export type AppUpdatePolicyStatus = typeof APP_UPDATE_POLICY_STATUSES[number];
 export type AppUpdateAction = typeof APP_UPDATE_ACTIONS[number];
+export type AppUpdateAuditEventType = typeof APP_UPDATE_AUDIT_EVENT_TYPES[number];
+export type AppUpdatePolicyValidationMode = typeof APP_UPDATE_POLICY_VALIDATION_MODES[number];
 export type PublishMode = "IMMEDIATE" | "SCHEDULED";
 
 export interface AppUpdatePolicy {
@@ -62,23 +75,28 @@ export interface AppUpdatePreview {
   results: AppUpdatePreviewResult[];
 }
 
-export interface AppUpdateAuditLog {
-  id: number | string | null;
-  policyId: number;
-  revision: number;
-  eventType: string;
+export interface AppUpdateAudit {
+  id: number;
+  policyId: number | null;
+  revision: number | null;
+  platform: AppPlatform | null;
+  eventType: AppUpdateAuditEventType;
   success: boolean;
-  beforePolicy: AppUpdatePolicy | null;
-  afterPolicy: AppUpdatePolicy | null;
-  actorId: number;
+  beforeSnapshot: unknown | null;
+  afterSnapshot: unknown | null;
+  actorId: number | null;
   publishedBy: number | null;
-  occurredAt: string;
   publishedAt: string | null;
+  createdAt: string;
   reason: string;
-  requestIp: string;
-  userAgent: string;
+  requestIp: string | null;
+  userAgent: string | null;
   requestId: string;
+  failureMessage: string | null;
 }
+
+/** @deprecated Use AppUpdateAudit. Kept for existing administrator page imports. */
+export type AppUpdateAuditLog = AppUpdateAudit;
 
 export interface AppUpdateAuditLogPage {
   items: AppUpdateAuditLog[];
@@ -126,6 +144,14 @@ export type AppUpdatePolicyUpdateRequest = AppUpdatePolicyDraftValues & {
   reason: string;
 };
 
+export type AppUpdatePolicyRelaxRequest = {
+  revision: number;
+  expectedActivePolicyId: number;
+  expectedActiveRevision: number;
+  storeAvailabilityConfirmed: true;
+  reason: string;
+};
+
 export type AppUpdatePolicyFormValidation =
   | {
       ok: true;
@@ -140,6 +166,7 @@ export type AppUpdatePolicyFormValidation =
 const platformSet = new Set<string>(APP_UPDATE_PLATFORMS);
 const statusSet = new Set<string>(APP_UPDATE_POLICY_STATUSES);
 const actionSet = new Set<string>(APP_UPDATE_ACTIONS);
+const auditEventTypeSet = new Set<string>(APP_UPDATE_AUDIT_EVENT_TYPES);
 const unsafeTextPattern = /[\u0000-\u001f\u007f-\u009f]|[<>]/;
 const positiveIntegerPattern = /^[1-9]\d*$/;
 const kstDateTimePattern = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/;
@@ -189,6 +216,11 @@ function parseNullablePositiveId(value: unknown, field: string) {
 function parseRequiredString(value: unknown, field: string) {
   if (typeof value !== "string") invalidPolicyData(`${field} 값을 확인할 수 없습니다.`);
   return value;
+}
+
+function parseNullableString(value: unknown, field: string) {
+  if (value === null) return null;
+  return parseRequiredString(value, field);
 }
 
 export function parseAppUpdatePolicy(value: unknown): AppUpdatePolicy {
@@ -369,66 +401,56 @@ export function parseAppUpdatePreview(
     };
   });
 
-  const expected = [...new Set(expectedBuilds)].sort((first, second) => first - second);
-  const actual = [...new Set(results.map((entry) => entry.build))].sort((first, second) => first - second);
+  const expected = [...new Set(expectedBuilds)];
   if (
     expected.length === 0 ||
     expected.length !== expectedBuilds.length ||
     expected.some((build) => !isSafeInteger(build, 1)) ||
     results.length !== expected.length ||
-    actual.length !== expected.length ||
-    actual.some((build, index) => build !== expected[index])
+    results.some((entry, index) => entry.build !== expected[index])
   ) {
-    invalidPolicyData("요청한 모든 판정 경계값의 결과를 확인할 수 없습니다. 게시하지 말고 다시 시도해 주세요.");
+    invalidPolicyData("요청한 모든 판정 경계값의 결과가 입력 순서대로 반환되지 않았습니다. 게시하지 말고 다시 시도해 주세요.");
   }
 
   return {
     policyId: parsePositiveId(value.policyId, "policyId"),
     revision: parsePositiveId(value.revision, "revision"),
-    results: results.sort((first, second) => first.build - second.build),
+    results,
   };
-}
-
-function auditString(value: unknown, field: string, fallback = "-") {
-  if (value === undefined || value === null || value === "") return fallback;
-  if (typeof value !== "string") invalidPolicyData(`${field} 값을 확인할 수 없습니다.`);
-  return value;
 }
 
 function parseAuditLog(value: unknown): AppUpdateAuditLog {
   if (!isRecord(value)) invalidPolicyData("감사 로그 항목을 확인할 수 없습니다.");
-  const rawOccurredAt = value.occurredAt ?? value.createdAt ?? value.timestamp;
-  const rawId = value.id ?? null;
-  if (rawId !== null && typeof rawId !== "string" && !isSafeInteger(rawId, 1)) {
-    invalidPolicyData("감사 로그 ID를 확인할 수 없습니다.");
+  if (typeof value.eventType !== "string" || !auditEventTypeSet.has(value.eventType)) {
+    invalidPolicyData("감사 로그 작업 종류를 확인할 수 없습니다.");
+  }
+  if (value.platform !== null && (typeof value.platform !== "string" || !platformSet.has(value.platform))) {
+    invalidPolicyData("감사 로그 플랫폼을 확인할 수 없습니다.");
   }
   if (typeof value.success !== "boolean") {
     invalidPolicyData("감사 로그 처리 결과를 확인할 수 없습니다.");
   }
+  if (value.beforeSnapshot === undefined || value.afterSnapshot === undefined) {
+    invalidPolicyData("감사 로그 변경 전후 정보를 확인할 수 없습니다.");
+  }
   return {
-    id: rawId === null ? null : rawId as number | string,
-    policyId: parsePositiveId(value.policyId, "policyId"),
-    revision: parsePositiveId(value.revision, "revision"),
-    eventType: auditString(value.eventType, "eventType"),
+    id: parsePositiveId(value.id, "id"),
+    policyId: parseNullablePositiveId(value.policyId, "policyId"),
+    revision: parseNullablePositiveId(value.revision, "revision"),
+    platform: value.platform as AppPlatform | null,
+    eventType: value.eventType as AppUpdateAuditEventType,
     success: value.success,
-    beforePolicy: value.beforePolicy === null || value.beforePolicy === undefined
-      ? null
-      : parseAppUpdatePolicy(value.beforePolicy),
-    afterPolicy: value.afterPolicy === null || value.afterPolicy === undefined
-      ? null
-      : parseAppUpdatePolicy(value.afterPolicy),
-    actorId: parsePositiveId(value.actorId, "actorId"),
-    publishedBy: value.publishedBy === null || value.publishedBy === undefined
-      ? null
-      : parsePositiveId(value.publishedBy, "publishedBy"),
-    occurredAt: parseRequiredTimestamp(rawOccurredAt, "occurredAt"),
-    publishedAt: value.publishedAt === undefined || value.publishedAt === null
-      ? null
-      : parseRequiredTimestamp(value.publishedAt, "publishedAt"),
-    reason: auditString(value.reason, "reason", "사유 정보 없음"),
-    requestIp: auditString(value.requestIp ?? value.ip, "requestIp"),
-    userAgent: auditString(value.userAgent, "userAgent"),
-    requestId: auditString(value.requestId, "requestId"),
+    beforeSnapshot: value.beforeSnapshot,
+    afterSnapshot: value.afterSnapshot,
+    actorId: parseNullablePositiveId(value.actorId, "actorId"),
+    publishedBy: parseNullablePositiveId(value.publishedBy, "publishedBy"),
+    publishedAt: parseNullableTimestamp(value.publishedAt, "publishedAt"),
+    createdAt: parseRequiredTimestamp(value.createdAt, "createdAt"),
+    reason: parseRequiredString(value.reason, "reason"),
+    requestIp: parseNullableString(value.requestIp, "requestIp"),
+    userAgent: parseNullableString(value.userAgent, "userAgent"),
+    requestId: parseRequiredString(value.requestId, "requestId"),
+    failureMessage: parseNullableString(value.failureMessage, "failureMessage"),
   };
 }
 
@@ -554,37 +576,40 @@ type ForceUpdateSettings = Pick<
   "forceUpdateEnabled" | "minimumSupportedBuild"
 >;
 
-export function appUpdateRelaxationError(
+export function isAppUpdateRelaxation(
   nextPolicy: ForceUpdateSettings,
   activePolicy: ForceUpdateSettings | null,
 ) {
   if (!activePolicy?.forceUpdateEnabled || activePolicy.minimumSupportedBuild === null) {
-    return null;
+    return false;
   }
+  return !nextPolicy.forceUpdateEnabled ||
+    nextPolicy.minimumSupportedBuild === null ||
+    nextPolicy.minimumSupportedBuild < activePolicy.minimumSupportedBuild;
+}
+
+export function appUpdateRelaxationError(
+  nextPolicy: ForceUpdateSettings,
+  activePolicy: ForceUpdateSettings | null,
+) {
+  if (!isAppUpdateRelaxation(nextPolicy, activePolicy)) return null;
   if (!nextPolicy.forceUpdateEnabled || nextPolicy.minimumSupportedBuild === null) {
     return "현재 강제 업데이트를 해제하려면 긴급 완화·롤백을 사용해 주세요.";
   }
-  if (nextPolicy.minimumSupportedBuild < activePolicy.minimumSupportedBuild) {
-    return "현재 최소 지원 빌드를 낮추려면 긴급 완화·롤백을 사용해 주세요.";
-  }
-  return null;
+  return "현재 최소 지원 빌드를 낮추려면 긴급 완화·롤백을 사용해 주세요.";
 }
 
 export function appUpdatePublishSafetyError(
   nextPolicy: ForceUpdateSettings,
   activePolicy: ForceUpdateSettings | null,
 ) {
-  const relaxationError = appUpdateRelaxationError(nextPolicy, activePolicy);
-  if (relaxationError) return relaxationError;
-  if (!activePolicy && nextPolicy.forceUpdateEnabled) {
-    return "첫 정책은 강제 업데이트를 끈 상태로 먼저 게시해 긴급 복구 기준을 만들어 주세요.";
-  }
-  return null;
+  return appUpdateRelaxationError(nextPolicy, activePolicy);
 }
 
 export function validateAppUpdatePolicyForm(
   form: AppUpdatePolicyForm,
   activePolicy: AppUpdatePolicy | null = null,
+  mode: AppUpdatePolicyValidationMode = "STANDARD",
 ): AppUpdatePolicyFormValidation {
   const errors: AppUpdatePolicyFieldErrors = {};
   const latestVersion = form.latestVersion.trim();
@@ -608,11 +633,16 @@ export function validateAppUpdatePolicyForm(
     }
   }
 
-  const relaxationError = appUpdateRelaxationError(
-    { forceUpdateEnabled: form.forceUpdateEnabled, minimumSupportedBuild },
-    activePolicy,
-  );
-  if (relaxationError) {
+  const nextForceSettings = {
+    forceUpdateEnabled: form.forceUpdateEnabled,
+    minimumSupportedBuild,
+  };
+  const relaxationError = appUpdateRelaxationError(nextForceSettings, activePolicy);
+  if (mode === "RELAX_DRAFT") {
+    if (!isAppUpdateRelaxation(nextForceSettings, activePolicy)) {
+      errors.forceUpdateEnabled = "긴급 완화 초안은 현재 활성 정책보다 강제 조건을 낮춰야 합니다.";
+    }
+  } else if (relaxationError) {
     if (form.forceUpdateEnabled) errors.minimumSupportedBuild = relaxationError;
     else errors.forceUpdateEnabled = relaxationError;
   }
@@ -649,8 +679,9 @@ export function validateAppUpdatePolicyForm(
 export function createAppUpdatePolicyCreateRequest(
   form: AppUpdatePolicyForm,
   activePolicy: AppUpdatePolicy | null = null,
+  mode: AppUpdatePolicyValidationMode = "STANDARD",
 ): AppUpdatePolicyCreateRequest {
-  const result = validateAppUpdatePolicyForm(form, activePolicy);
+  const result = validateAppUpdatePolicyForm(form, activePolicy, mode);
   if (!result.ok) throw userFacingError("정책 입력 내용을 다시 확인해 주세요.");
   return {
     platform: form.platform,
@@ -663,14 +694,54 @@ export function createAppUpdatePolicyUpdateRequest(
   form: AppUpdatePolicyForm,
   revision: number,
   activePolicy: AppUpdatePolicy | null = null,
+  mode: AppUpdatePolicyValidationMode = "STANDARD",
 ): AppUpdatePolicyUpdateRequest {
   if (!isSafeInteger(revision, 1)) throw userFacingError("정책 revision을 확인할 수 없습니다.");
-  const result = validateAppUpdatePolicyForm(form, activePolicy);
+  const result = validateAppUpdatePolicyForm(form, activePolicy, mode);
   if (!result.ok) throw userFacingError("정책 입력 내용을 다시 확인해 주세요.");
   return {
     revision,
     ...result.values,
     reason: result.reason,
+  };
+}
+
+export function validateAppUpdatePolicyRelaxRequest(
+  draftPolicy: AppUpdatePolicy,
+  activePolicy: AppUpdatePolicy,
+  storeAvailabilityConfirmed: boolean,
+  reason: string,
+) {
+  if (draftPolicy.status !== "DRAFT") return "긴급 완화 대상은 DRAFT 상태여야 합니다.";
+  if (activePolicy.status !== "ACTIVE") return "현재 ACTIVE 정책을 다시 확인해 주세요.";
+  if (draftPolicy.platform !== activePolicy.platform) return "같은 플랫폼의 정책만 긴급 완화할 수 있습니다.";
+  if (draftPolicy.id === activePolicy.id) return "현재 활성 정책과 별도로 생성한 완화 초안을 선택해 주세요.";
+  if (!isAppUpdateRelaxation(draftPolicy, activePolicy)) {
+    return "긴급 완화 정책은 현재 활성 정책보다 강제 조건을 낮춰야 합니다.";
+  }
+  if (!storeAvailabilityConfirmed) return "스토어 설치 가능 여부를 확인해 주세요.";
+  return validateAppUpdateReason(reason);
+}
+
+export function createAppUpdatePolicyRelaxRequest(
+  draftPolicy: AppUpdatePolicy,
+  activePolicy: AppUpdatePolicy,
+  storeAvailabilityConfirmed: boolean,
+  reason: string,
+): AppUpdatePolicyRelaxRequest {
+  const error = validateAppUpdatePolicyRelaxRequest(
+    draftPolicy,
+    activePolicy,
+    storeAvailabilityConfirmed,
+    reason,
+  );
+  if (error) throw userFacingError(error);
+  return {
+    revision: draftPolicy.revision,
+    expectedActivePolicyId: activePolicy.id,
+    expectedActiveRevision: activePolicy.revision,
+    storeAvailabilityConfirmed: true,
+    reason: reason.trim(),
   };
 }
 
@@ -686,7 +757,7 @@ export function appUpdatePreviewBuilds(policy: AppUpdatePolicy) {
   }
   if (policy.latestBuild > 1) builds.add(policy.latestBuild - 1);
   builds.add(policy.latestBuild);
-  return [...builds].sort((first, second) => first - second);
+  return [...builds];
 }
 
 function validKstDateTimeParts(match: RegExpMatchArray) {

@@ -36,6 +36,7 @@ import {
   getAdminSession,
 } from "../../lib/auth";
 import {
+  APP_UPDATE_AUDIT_EVENT_TYPES,
   APP_UPDATE_AUDIT_LOGS_ENDPOINT,
   APP_UPDATE_PLATFORMS,
   APP_UPDATE_POLICY_STATUSES,
@@ -54,10 +55,12 @@ import {
   appUpdatePreviewBuilds,
   copyAppUpdateWording,
   createAppUpdatePolicyCreateRequest,
+  createAppUpdatePolicyRelaxRequest,
   createAppUpdatePolicyUpdateRequest,
   createOperationIdempotencyKey,
   emptyAppUpdatePolicyForm,
   extractAppUpdateFieldErrors,
+  isAppUpdateRelaxation,
   kstDateTimeToUtcIso,
   parseAppUpdateAuditLogPage,
   parseAppUpdatePolicy,
@@ -66,6 +69,7 @@ import {
   validateAppStoreUrl,
   validateAppUpdatePolicySet,
   validateAppUpdatePolicyForm,
+  validateAppUpdatePolicyRelaxRequest,
   validateAppUpdateReason,
 } from "../../lib/app-update-policies";
 import styles from "./app-updates.module.css";
@@ -101,26 +105,43 @@ type PreviewState = {
 };
 type PublishDialogState = {
   policy: AppUpdatePolicy;
+  activePolicyIdAtStart: number | null;
   mode: PublishMode;
   effectiveAt: string;
   storeAvailabilityConfirmed: boolean;
   reason: string;
   confirmation: string;
   idempotencyKey: string;
+  retryReady: boolean;
   error: string;
 };
 type CancelDialogState = {
   policy: AppUpdatePolicy;
+  activePolicyIdAtStart: number | null;
   reason: string;
   idempotencyKey: string;
+  retryReady: boolean;
   error: string;
 };
 type RollbackDialogState = {
   target: AppUpdatePolicy;
   active: AppUpdatePolicy;
+  scheduledPolicyIdAtStart: number | null;
   reason: string;
   confirmation: string;
   idempotencyKey: string;
+  retryReady: boolean;
+  error: string;
+};
+type RelaxDialogState = {
+  policy: AppUpdatePolicy;
+  active: AppUpdatePolicy;
+  scheduledPolicyIdAtStart: number | null;
+  storeAvailabilityConfirmed: boolean;
+  reason: string;
+  confirmation: string;
+  idempotencyKey: string;
+  retryReady: boolean;
   error: string;
 };
 type AuditFilters = {
@@ -157,10 +178,10 @@ const auditEventLabels: Record<string, string> = {
   UPDATE: "초안 수정",
   PUBLISH: "즉시 게시",
   SCHEDULE: "예약 게시",
-  SCHEDULED_PUBLISH: "예약 게시",
-  SCHEDULE_APPLIED: "예약 적용",
+  ACTIVATE: "예약 적용",
   CANCEL: "예약 취소",
-  ROLLBACK: "긴급 완화·롤백",
+  ROLLBACK: "과거 정책 롤백",
+  RELAX: "강제 조건 긴급 완화",
 };
 
 const kstDateTimeFormatter = new Intl.DateTimeFormat("ko-KR", {
@@ -196,7 +217,40 @@ function operationConfirmation(policy: Pick<AppUpdatePolicy, "platform" | "lates
 }
 
 function policySort(first: AppUpdatePolicy, second: AppUpdatePolicy) {
-  return new Date(second.updatedAt).getTime() - new Date(first.updatedAt).getTime() || second.id - first.id;
+  return second.id - first.id;
+}
+
+function safeApiErrorText(error: unknown) {
+  if (error instanceof ApiError && error.payload && typeof error.payload === "object") {
+    const message = "message" in error.payload ? error.payload.message : null;
+    if (
+      typeof message === "string" &&
+      message.trim().length > 0 &&
+      message.trim().length <= 500 &&
+      !/[<>\u0000-\u001f\u007f-\u009f]/.test(message)
+    ) {
+      return message.trim();
+    }
+  }
+  return getErrorText(error);
+}
+
+async function loadPolicyDetail(policyId: number, signal?: AbortSignal) {
+  const payload = await apiFetch<unknown>(`${APP_UPDATE_POLICIES_ENDPOINT}/${policyId}`, {
+    method: "GET",
+    cache: "no-store",
+    signal,
+  });
+  return parseAppUpdatePolicy(payload);
+}
+
+function draftValidationMode(form: AppUpdatePolicyForm, activePolicy: AppUpdatePolicy | null) {
+  if (!activePolicy?.forceUpdateEnabled || activePolicy.minimumSupportedBuild === null) return "STANDARD" as const;
+  if (!form.forceUpdateEnabled) return "RELAX_DRAFT" as const;
+  const minimumBuild = Number(form.minimumSupportedBuild.trim());
+  return Number.isSafeInteger(minimumBuild) && minimumBuild < activePolicy.minimumSupportedBuild
+    ? "RELAX_DRAFT" as const
+    : "STANDARD" as const;
 }
 
 function fieldLabel(field: keyof AppUpdatePolicyForm) {
@@ -245,13 +299,33 @@ function changedFields(current: AppUpdatePolicy | null, next: AppUpdatePolicy) {
   return fields.filter((field) => policyValue(current, field) !== policyValue(next, field));
 }
 
-function policySnapshot(policy: AppUpdatePolicy | null) {
-  if (!policy) return "기록 없음";
-  return JSON.stringify(policy, null, 2);
+function policySnapshot(snapshot: unknown | null) {
+  if (snapshot === null) return "기록 없음";
+  try {
+    return JSON.stringify(snapshot, null, 2) ?? "기록 없음";
+  } catch {
+    return "기록을 표시할 수 없습니다.";
+  }
+}
+
+function samePolicyValues(first: AppUpdatePolicy, second: AppUpdatePolicy) {
+  return first.platform === second.platform &&
+    first.latestVersion === second.latestVersion &&
+    first.latestBuild === second.latestBuild &&
+    first.forceUpdateEnabled === second.forceUpdateEnabled &&
+    first.minimumSupportedBuild === second.minimumSupportedBuild &&
+    first.optionalUpdateEnabled === second.optionalUpdateEnabled &&
+    first.storeUrl === second.storeUrl &&
+    first.title === second.title &&
+    first.message === second.message;
+}
+
+function relaxConfirmation(policy: Pick<AppUpdatePolicy, "platform" | "latestBuild">) {
+  return `${policy.platform} ${policy.latestBuild} 긴급 완화`;
 }
 
 function isAmbiguousMutationError(error: unknown) {
-  return error instanceof ApiError && (error.status === 0 || error.status >= 500);
+  return !(error instanceof ApiError) || error.status === 0 || error.status === 408 || error.status >= 500;
 }
 
 function policyUrl(
@@ -496,7 +570,9 @@ export default function AppUpdatesPage() {
   const [publishDialog, setPublishDialog] = useState<PublishDialogState | null>(null);
   const [cancelDialog, setCancelDialog] = useState<CancelDialogState | null>(null);
   const [rollbackDialog, setRollbackDialog] = useState<RollbackDialogState | null>(null);
-  const [busyOperation, setBusyOperation] = useState<"publish" | "cancel" | "rollback" | "">("");
+  const [relaxDialog, setRelaxDialog] = useState<RelaxDialogState | null>(null);
+  const [permissionDenied, setPermissionDenied] = useState(false);
+  const [busyOperation, setBusyOperation] = useState<"publish" | "cancel" | "rollback" | "relax" | "">("");
   const [historyVisibleCount, setHistoryVisibleCount] = useState(8);
   const [auditDialog, setAuditDialog] = useState<AuditDialogState>({
     open: false,
@@ -576,6 +652,7 @@ export default function AppUpdatesPage() {
       }));
       if (controller.signal.aborted) return null;
       const items = validateAppUpdatePolicySet(platform, statusItems.flat()).sort(policySort);
+      setPermissionDenied(false);
       setPlatformPolicies((current) => ({
         ...current,
         [platform]: { status: "ready", items, error: "" },
@@ -583,12 +660,13 @@ export default function AppUpdatesPage() {
       return items;
     } catch (error) {
       if (controller.signal.aborted) return null;
+      if (error instanceof ApiError && error.status === 403) setPermissionDenied(true);
       setPlatformPolicies((current) => ({
         ...current,
         [platform]: {
           ...current[platform],
           status: "error",
-          error: getErrorText(error),
+          error: safeApiErrorText(error),
         },
       }));
       return null;
@@ -623,9 +701,10 @@ export default function AppUpdatesPage() {
       }));
     } catch (error) {
       if (controller.signal.aborted) return;
+      if (error instanceof ApiError && error.status === 403) setPermissionDenied(true);
       setRecentAudits((current) => ({
         ...current,
-        [platform]: { status: "error", item: null, error: getErrorText(error) },
+        [platform]: { status: "error", item: null, error: safeApiErrorText(error) },
       }));
     } finally {
       if (recentAuditControllers.current[platform] === controller) {
@@ -637,7 +716,7 @@ export default function AppUpdatesPage() {
   const refreshPlatform = useCallback(async (platform: AppPlatform) => {
     const items = await loadPolicies(platform);
     await loadRecentAudit(platform);
-    return items !== null;
+    return items;
   }, [loadPolicies, loadRecentAudit]);
 
   useEffect(() => {
@@ -651,9 +730,16 @@ export default function AppUpdatesPage() {
         }
         setPlatformPolicies({ IOS: emptyPolicyState(), ANDROID: emptyPolicyState() });
         setRecentAudits({ IOS: emptyRecentAuditState(), ANDROID: emptyRecentAuditState() });
+        setPermissionDenied(false);
         setEditor(null);
+        setPreview(null);
+        setPublishDialog(null);
+        setCancelDialog(null);
+        setRollbackDialog(null);
+        setRelaxDialog(null);
         return;
       }
+      setPermissionDenied(false);
       for (const platform of APP_UPDATE_PLATFORMS) {
         void loadPolicies(platform);
         void loadRecentAudit(platform);
@@ -695,6 +781,7 @@ export default function AppUpdatesPage() {
   const otherPlatform: AppPlatform = selectedPlatform === "IOS" ? "ANDROID" : "IOS";
   const otherActivePolicy = platformPolicies[otherPlatform].items.find((policy) => policy.status === "ACTIVE") ?? null;
   const editorDirty = editor !== null && appUpdatePolicyFormSignature(editor.form) !== editor.baseline;
+  const editorIsRelaxation = editor !== null && draftValidationMode(editor.form, activePolicy) === "RELAX_DRAFT";
 
   function switchPlatform(platform: AppPlatform) {
     if (savingDraft) return false;
@@ -739,6 +826,18 @@ export default function AppUpdatesPage() {
   function startFromActive() {
     if (savingDraft || !activePolicy) return;
     const form = { ...appUpdatePolicyToForm(activePolicy), reason: "" };
+    startCreate(form);
+  }
+
+  function startRelaxationDraft() {
+    if (savingDraft || !activePolicy?.forceUpdateEnabled) return;
+    const form: AppUpdatePolicyForm = {
+      ...appUpdatePolicyToForm(activePolicy),
+      forceUpdateEnabled: false,
+      minimumSupportedBuild: "",
+      optionalUpdateEnabled: false,
+      reason: "",
+    };
     startCreate(form);
   }
 
@@ -792,7 +891,8 @@ export default function AppUpdatesPage() {
       mutationInProgress.current ||
       platformPolicies[editor.form.platform].status !== "ready"
     ) return;
-    const validation = validateAppUpdatePolicyForm(editor.form, activePolicy);
+    const validationMode = draftValidationMode(editor.form, activePolicy);
+    const validation = validateAppUpdatePolicyForm(editor.form, activePolicy, validationMode);
     if (!validation.ok) {
       setFieldErrors(validation.errors);
       const firstField = Object.keys(validation.errors)[0];
@@ -808,12 +908,27 @@ export default function AppUpdatesPage() {
     mutationController.current = controller;
 
     try {
+      let currentDraft = editor.policy;
+      if (editor.mode === "edit") {
+        currentDraft = await loadPolicyDetail(editor.policy!.id, controller.signal);
+        if (
+          currentDraft.platform !== editor.form.platform ||
+          currentDraft.status !== "DRAFT" ||
+          currentDraft.revision !== editor.policy!.revision
+        ) {
+          throw new ApiError(
+            "초안이 변경되었습니다. 최신 초안을 다시 확인해 주세요.",
+            409,
+            { message: "초안이 변경되었습니다. 최신 초안을 다시 확인해 주세요." },
+          );
+        }
+      }
       const path = editor.mode === "create"
         ? APP_UPDATE_POLICIES_ENDPOINT
-        : `${APP_UPDATE_POLICIES_ENDPOINT}/${editor.policy?.id}`;
+        : `${APP_UPDATE_POLICIES_ENDPOINT}/${currentDraft!.id}`;
       const body = editor.mode === "create"
-        ? createAppUpdatePolicyCreateRequest(editor.form, activePolicy)
-        : createAppUpdatePolicyUpdateRequest(editor.form, editor.policy!.revision, activePolicy);
+        ? createAppUpdatePolicyCreateRequest(editor.form, activePolicy, validationMode)
+        : createAppUpdatePolicyUpdateRequest(editor.form, currentDraft!.revision, activePolicy, validationMode);
       const payload = await apiFetch<unknown>(path, {
         method: editor.mode === "create" ? "POST" : "PUT",
         headers: { "Content-Type": "application/json" },
@@ -824,6 +939,12 @@ export default function AppUpdatesPage() {
       const savedPolicy = parseAppUpdatePolicy(payload);
       if (savedPolicy.platform !== selectedPlatform || savedPolicy.status !== "DRAFT") {
         throw new Error("저장된 초안 상태를 확인할 수 없습니다.");
+      }
+      if (editor.mode === "create" && savedPolicy.revision !== 1) {
+        throw new Error("새 초안의 revision을 확인할 수 없습니다.");
+      }
+      if (editor.mode === "edit" && currentDraft && savedPolicy.revision <= currentDraft.revision) {
+        throw new Error("수정된 초안의 revision이 갱신되지 않았습니다.");
       }
       const savedForm = appUpdatePolicyToForm(savedPolicy);
       setEditor({
@@ -842,7 +963,16 @@ export default function AppUpdatesPage() {
       if (controller.signal.aborted) return;
       const serverErrors = error instanceof ApiError ? extractAppUpdateFieldErrors(error.payload) : {};
       if (Object.keys(serverErrors).length > 0) setFieldErrors(serverErrors);
-      if (error instanceof ApiError && error.status === 409) {
+      if (error instanceof ApiError && error.status === 404) {
+        setEditor(null);
+        await refreshPlatform(selectedPlatform);
+        setFeedback({
+          tone: "warning",
+          title: "초안을 찾을 수 없습니다.",
+          message: "정책 목록을 다시 불러왔습니다. 새 초안을 선택해 주세요.",
+        });
+      } else if (error instanceof ApiError && error.status === 409) {
+        if (editor.policy) await loadPolicyDetail(editor.policy.id).catch(() => null);
         const refreshed = await refreshPlatform(selectedPlatform);
         setFeedback({
           tone: "warning",
@@ -851,11 +981,19 @@ export default function AppUpdatesPage() {
             ? "최신 목록을 다시 불러왔습니다. 초안을 다시 열어 변경 내용을 확인해 주세요."
             : "최신 목록도 확인하지 못했습니다. 추가 작업 전에 목록을 다시 확인해 주세요.",
         });
+      } else if (error instanceof ApiError && error.status === 403) {
+        setPermissionDenied(true);
+        setEditor(null);
+        setFeedback({
+          tone: "error",
+          title: "관리자 권한이 없습니다.",
+          message: safeApiErrorText(error),
+        });
       } else {
         setFeedback({
           tone: "error",
           title: "정책 초안을 저장하지 못했습니다.",
-          message: getErrorText(error),
+          message: safeApiErrorText(error),
         });
       }
     } finally {
@@ -866,21 +1004,24 @@ export default function AppUpdatesPage() {
   }
 
   async function openPreview(policy: AppUpdatePolicy) {
-    if (savingDraft || policy.status !== "DRAFT") return;
+    if (savingDraft) return;
     previewController.current?.abort();
     const controller = new AbortController();
     previewController.current = controller;
     setPreview({ policy, status: "loading", data: null, selectedBuild: null, error: "" });
     try {
-      const latestItems = await loadPolicies(policy.platform);
-      if (!latestItems) throw new Error("최신 정책 상태를 확인하지 못했습니다. 다시 시도해 주세요.");
-      const latestPolicy = latestItems.find((item) => item.id === policy.id);
-      if (!latestPolicy || latestPolicy.status !== "DRAFT" || latestPolicy.revision !== policy.revision) {
-        throw new Error("초안이 변경되었습니다. 목록에서 최신 초안을 다시 열어 주세요.");
+      const latestPolicy = await loadPolicyDetail(policy.id, controller.signal);
+      if (
+        latestPolicy.platform !== policy.platform ||
+        latestPolicy.status !== policy.status ||
+        latestPolicy.revision !== policy.revision
+      ) {
+        throw new ApiError(
+          "정책이 변경되었습니다. 목록에서 최신 정책을 다시 열어 주세요.",
+          409,
+          { message: "정책이 변경되었습니다. 목록에서 최신 정책을 다시 열어 주세요." },
+        );
       }
-      const latestActivePolicy = latestItems.find((item) => item.status === "ACTIVE") ?? null;
-      const publishSafetyError = appUpdatePublishSafetyError(latestPolicy, latestActivePolicy);
-      if (publishSafetyError) throw new Error(publishSafetyError);
 
       const requestedBuilds = appUpdatePreviewBuilds(latestPolicy);
       const payload = await apiFetch<unknown>(`${APP_UPDATE_POLICIES_ENDPOINT}/${latestPolicy.id}/preview`, {
@@ -906,13 +1047,27 @@ export default function AppUpdatesPage() {
       });
     } catch (error) {
       if (controller.signal.aborted) return;
-      if (error instanceof ApiError && error.status === 409) await refreshPlatform(policy.platform);
+      if (error instanceof ApiError && error.status === 404) {
+        setPreview(null);
+        await refreshPlatform(policy.platform);
+        setFeedback({ tone: "warning", title: "정책을 찾을 수 없습니다.", message: safeApiErrorText(error) });
+        return;
+      }
+      if (error instanceof ApiError && error.status === 403) {
+        setPermissionDenied(true);
+        setPreview(null);
+        setFeedback({ tone: "error", title: "관리자 권한이 없습니다.", message: safeApiErrorText(error) });
+        return;
+      }
+      if (error instanceof ApiError && error.status === 409) {
+        await refreshPlatform(policy.platform);
+      }
       setPreview({
         policy,
         status: "error",
         data: null,
         selectedBuild: null,
-        error: getErrorText(error),
+        error: safeApiErrorText(error),
       });
     } finally {
       if (previewController.current === controller) previewController.current = null;
@@ -920,58 +1075,51 @@ export default function AppUpdatesPage() {
   }
 
   function beginPublish(policy: AppUpdatePolicy) {
+    if (policy.status !== "DRAFT" || isAppUpdateRelaxation(policy, activePolicy)) return;
     setPreview(null);
     setPublishDialog({
       policy,
+      activePolicyIdAtStart: activePolicy?.id ?? null,
       mode: "IMMEDIATE",
       effectiveAt: "",
       storeAvailabilityConfirmed: false,
       reason: "",
       confirmation: "",
       idempotencyKey: createOperationIdempotencyKey(),
+      retryReady: false,
       error: "",
     });
   }
 
-  async function reconcileUnclearMutation(platform: AppPlatform, action: string) {
-    const refreshed = await refreshPlatform(platform);
-    setFeedback({
-      tone: "warning",
-      title: `${action} 응답을 명확히 확인하지 못했습니다.`,
-      message: refreshed
-        ? "성공이나 실패를 추측하지 않고 서버의 최신 정책 상태를 다시 불러왔습니다. 현황을 확인해 주세요."
-        : "현재 정책 상태도 다시 확인하지 못했습니다. 추가 작업을 하지 말고 ‘다시 확인’을 눌러 최신 상태부터 확인해 주세요.",
-    });
-  }
-
   async function submitPublish() {
-    if (!publishDialog || mutationInProgress.current) return;
-    const reasonError = validateAppUpdateReason(publishDialog.reason);
+    const dialog = publishDialog;
+    if (!dialog || mutationInProgress.current) return;
+    const reasonError = validateAppUpdateReason(dialog.reason);
     if (reasonError) {
       setPublishDialog((current) => current ? { ...current, error: reasonError } : null);
       return;
     }
-    if (!publishDialog.storeAvailabilityConfirmed) {
+    if (!dialog.storeAvailabilityConfirmed) {
       setPublishDialog((current) => current ? {
         ...current,
         error: "대상 국가·트랙에서 실제 설치 가능한 상태인지 확인해 주세요.",
       } : null);
       return;
     }
-    if (publishDialog.confirmation !== operationConfirmation(publishDialog.policy)) {
+    if (dialog.confirmation !== operationConfirmation(dialog.policy)) {
       setPublishDialog((current) => current ? { ...current, error: "확인 문구를 정확히 입력해 주세요." } : null);
       return;
     }
 
     let effectiveAt: string | null = null;
-    if (publishDialog.mode === "SCHEDULED") {
+    if (dialog.mode === "SCHEDULED") {
       try {
-        effectiveAt = kstDateTimeToUtcIso(publishDialog.effectiveAt);
+        effectiveAt = kstDateTimeToUtcIso(dialog.effectiveAt);
       } catch (error) {
-        setPublishDialog((current) => current ? { ...current, error: getErrorText(error) } : null);
+        setPublishDialog((current) => current ? { ...current, error: safeApiErrorText(error) } : null);
         return;
       }
-      if (Date.parse(effectiveAt) <= Date.now()) {
+      if (!dialog.retryReady && Date.parse(effectiveAt) <= Date.now()) {
         setPublishDialog((current) => current ? { ...current, error: "예약 시각은 현재보다 미래여야 합니다." } : null);
         return;
       }
@@ -981,83 +1129,136 @@ export default function AppUpdatesPage() {
     setBusyOperation("publish");
     const controller = new AbortController();
     mutationController.current = controller;
+    let mutationSent = false;
     try {
-      const platform = publishDialog.policy.platform;
-      const latestItems = await loadPolicies(platform);
-      if (controller.signal.aborted) return;
-      if (!latestItems) {
-        setPublishDialog((current) => current ? {
-          ...current,
-          error: "최신 정책 상태를 확인하지 못해 게시를 중단했습니다. 목록을 다시 확인해 주세요.",
-        } : null);
-        return;
+      const platform = dialog.policy.platform;
+      if (!dialog.retryReady) {
+        const latestItems = await loadPolicies(platform);
+        if (controller.signal.aborted) return;
+        if (!latestItems) {
+          setPublishDialog((current) => current ? {
+            ...current,
+            error: "최신 정책 상태를 확인하지 못해 게시를 중단했습니다. 다시 확인해 주세요.",
+          } : null);
+          return;
+        }
+        const listedActive = latestItems.find((item) => item.status === "ACTIVE") ?? null;
+        const latestActive = listedActive
+          ? await loadPolicyDetail(listedActive.id, controller.signal)
+          : null;
+        const latestPolicy = await loadPolicyDetail(dialog.policy.id, controller.signal);
+        if (
+          latestPolicy.platform !== platform ||
+          latestPolicy.status !== "DRAFT" ||
+          latestPolicy.revision !== dialog.policy.revision
+        ) {
+          throw new ApiError("초안이 변경되었습니다.", 409, {
+            message: "초안이 변경되었습니다. 최신 초안을 다시 확인해 주세요.",
+          });
+        }
+        const publishSafetyError = appUpdatePublishSafetyError(latestPolicy, latestActive);
+        if (publishSafetyError) {
+          setPublishDialog((current) => current ? { ...current, error: publishSafetyError } : null);
+          return;
+        }
       }
 
-      const latestPolicy = latestItems.find((item) => item.id === publishDialog.policy.id);
-      if (
-        !latestPolicy ||
-        latestPolicy.status !== "DRAFT" ||
-        latestPolicy.revision !== publishDialog.policy.revision
-      ) {
-        setPublishDialog((current) => current ? {
-          ...current,
-          error: "초안이 변경되었습니다. 창을 닫고 최신 초안으로 다시 미리보기해 주세요.",
-        } : null);
-        return;
-      }
-      const latestActivePolicy = latestItems.find((item) => item.status === "ACTIVE") ?? null;
-      const publishSafetyError = appUpdatePublishSafetyError(latestPolicy, latestActivePolicy);
-      if (publishSafetyError) {
-        setPublishDialog((current) => current ? { ...current, error: publishSafetyError } : null);
-        return;
-      }
-
-      await apiFetch<unknown>(`${APP_UPDATE_POLICIES_ENDPOINT}/${latestPolicy.id}/publish`, {
+      mutationSent = true;
+      const payload = await apiFetch<unknown>(`${APP_UPDATE_POLICIES_ENDPOINT}/${dialog.policy.id}/publish`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Idempotency-Key": publishDialog.idempotencyKey,
+          "Idempotency-Key": dialog.idempotencyKey,
         },
         body: JSON.stringify({
-          revision: latestPolicy.revision,
-          publishMode: publishDialog.mode,
+          revision: dialog.policy.revision,
+          publishMode: dialog.mode,
           effectiveAt,
           storeAvailabilityConfirmed: true,
-          reason: publishDialog.reason.trim(),
+          reason: dialog.reason.trim(),
         }),
         signal: controller.signal,
       });
       if (controller.signal.aborted) return;
-      const mode = publishDialog.mode;
+      const responsePolicy = parseAppUpdatePolicy(payload);
+      const expectedStatus = dialog.mode === "IMMEDIATE" ? "ACTIVE" : "SCHEDULED";
+      if (
+        responsePolicy.id !== dialog.policy.id ||
+        responsePolicy.platform !== dialog.policy.platform ||
+        responsePolicy.status !== expectedStatus
+      ) {
+        throw new ApiError("게시 결과 상태를 확인할 수 없습니다.");
+      }
+      const detail = await loadPolicyDetail(responsePolicy.id, controller.signal);
+      if (detail.status !== expectedStatus || detail.revision !== responsePolicy.revision) {
+        throw new ApiError("게시 후 정책 상세 상태를 확인할 수 없습니다.");
+      }
+      const refreshed = await refreshPlatform(platform);
+      const listed = refreshed?.find((item) => item.id === detail.id);
+      const activeAfter = refreshed?.find((item) => item.status === "ACTIVE") ?? null;
+      const scheduledAfter = refreshed?.find((item) => item.status === "SCHEDULED") ?? null;
+      const semanticSuccess = dialog.mode === "IMMEDIATE"
+        ? listed?.status === "ACTIVE" && activeAfter?.id === detail.id
+        : listed?.status === "SCHEDULED" && scheduledAfter?.id === detail.id &&
+          (activeAfter?.id ?? null) === dialog.activePolicyIdAtStart;
+      if (!semanticSuccess) throw new ApiError("게시 후 전체 정책 상태를 확인할 수 없습니다.");
       setPublishDialog(null);
       setEditor(null);
-      const refreshed = await refreshPlatform(platform);
       setFeedback({
-        tone: refreshed ? "success" : "warning",
-        title: mode === "IMMEDIATE" ? "새 정책을 게시했습니다." : "새 정책을 예약했습니다.",
-        message: refreshed
-          ? mode === "IMMEDIATE"
-            ? "서버의 활성 정책을 다시 조회해 적용 상태를 확인했습니다."
-            : "예약 상태를 다시 확인했습니다. 예약 시각에는 관리자 화면이 닫혀 있어도 서버에서 정책을 적용합니다."
-          : "게시 응답은 정상적으로 받았지만 최신 상태 재조회에 실패했습니다. 추가 작업 전에 목록을 다시 확인해 주세요.",
+        tone: "success",
+        title: dialog.mode === "IMMEDIATE" ? "새 정책을 게시했습니다." : "새 정책을 예약했습니다.",
+        message: dialog.mode === "IMMEDIATE"
+          ? "활성 정책 상세와 전체 목록에서 적용 상태를 확인했습니다."
+          : "예약 정책 상세와 현재 활성 정책 유지 상태를 확인했습니다.",
       });
     } catch (error) {
       if (controller.signal.aborted) return;
-      const platform = publishDialog.policy.platform;
-      setPublishDialog(null);
-      if (isAmbiguousMutationError(error)) {
-        await reconcileUnclearMutation(platform, "게시");
-      } else if (error instanceof ApiError && error.status === 409) {
+      const platform = dialog.policy.platform;
+      if (mutationSent && isAmbiguousMutationError(error)) {
         const refreshed = await refreshPlatform(platform);
+        const expectedStatus = dialog.mode === "IMMEDIATE" ? "ACTIVE" : "SCHEDULED";
+        const item = refreshed?.find((policy) => policy.id === dialog.policy.id);
+        if (item?.status === expectedStatus) {
+          setPublishDialog(null);
+          setEditor(null);
+          setFeedback({
+            tone: "success",
+            title: dialog.mode === "IMMEDIATE" ? "게시 완료를 확인했습니다." : "예약 완료를 확인했습니다.",
+            message: "응답은 불명확했지만 서버의 최신 정책 상태에서 작업 완료를 확인했습니다.",
+          });
+        } else {
+          setPublishDialog((current) => current ? {
+            ...current,
+            retryReady: true,
+            error: `${safeApiErrorText(error)} 최신 상태에서 완료를 확인하지 못했습니다. 같은 요청으로 다시 시도할 수 있습니다.`,
+          } : null);
+        }
+      } else if (error instanceof ApiError && error.status === 409) {
+        await loadPolicyDetail(dialog.policy.id).catch(() => null);
+        const refreshed = await refreshPlatform(platform);
+        setPublishDialog(null);
         setFeedback({
           tone: "warning",
           title: "정책 상태가 변경되어 게시하지 않았습니다.",
           message: refreshed
-            ? "최신 정책을 다시 불러왔습니다. revision과 적용 상태를 확인한 뒤 다시 진행해 주세요."
+            ? safeApiErrorText(error)
             : "최신 정책 상태도 확인하지 못했습니다. 추가 작업 전에 목록을 다시 확인해 주세요.",
         });
+      } else if (error instanceof ApiError && error.status === 404) {
+        setPublishDialog(null);
+        setEditor(null);
+        await refreshPlatform(platform);
+        setFeedback({ tone: "warning", title: "게시할 초안을 찾을 수 없습니다.", message: safeApiErrorText(error) });
+      } else if (error instanceof ApiError && error.status === 403) {
+        setPermissionDenied(true);
+        setPublishDialog(null);
+        setFeedback({ tone: "error", title: "관리자 권한이 없습니다.", message: safeApiErrorText(error) });
       } else {
-        setFeedback({ tone: "error", title: "정책을 게시하지 못했습니다.", message: getErrorText(error) });
+        setPublishDialog((current) => current ? {
+          ...current,
+          idempotencyKey: mutationSent ? createOperationIdempotencyKey() : current.idempotencyKey,
+          error: safeApiErrorText(error),
+        } : null);
       }
     } finally {
       if (mutationController.current === controller) mutationController.current = null;
@@ -1069,15 +1270,18 @@ export default function AppUpdatesPage() {
   function beginCancel(policy: AppUpdatePolicy) {
     setCancelDialog({
       policy,
+      activePolicyIdAtStart: activePolicy?.id ?? null,
       reason: "",
       idempotencyKey: createOperationIdempotencyKey(),
+      retryReady: false,
       error: "",
     });
   }
 
   async function submitCancel() {
-    if (!cancelDialog || mutationInProgress.current) return;
-    const reasonError = validateAppUpdateReason(cancelDialog.reason);
+    const dialog = cancelDialog;
+    if (!dialog || mutationInProgress.current) return;
+    const reasonError = validateAppUpdateReason(dialog.reason);
     if (reasonError) {
       setCancelDialog((current) => current ? { ...current, error: reasonError } : null);
       return;
@@ -1086,37 +1290,92 @@ export default function AppUpdatesPage() {
     setBusyOperation("cancel");
     const controller = new AbortController();
     mutationController.current = controller;
+    let mutationSent = false;
     try {
-      await apiFetch<unknown>(`${APP_UPDATE_POLICIES_ENDPOINT}/${cancelDialog.policy.id}/cancel`, {
+      if (!dialog.retryReady) {
+        const latest = await loadPolicyDetail(dialog.policy.id, controller.signal);
+        if (latest.status !== "SCHEDULED" || latest.revision !== dialog.policy.revision) {
+          throw new ApiError("예약 정책이 변경되었습니다.", 409, {
+            message: "예약 정책이 변경되었습니다. 최신 상태를 다시 확인해 주세요.",
+          });
+        }
+      }
+      mutationSent = true;
+      const payload = await apiFetch<unknown>(`${APP_UPDATE_POLICIES_ENDPOINT}/${dialog.policy.id}/cancel`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Idempotency-Key": cancelDialog.idempotencyKey,
+          "Idempotency-Key": dialog.idempotencyKey,
         },
         body: JSON.stringify({
-          revision: cancelDialog.policy.revision,
-          reason: cancelDialog.reason.trim(),
+          revision: dialog.policy.revision,
+          reason: dialog.reason.trim(),
         }),
         signal: controller.signal,
       });
       if (controller.signal.aborted) return;
-      const platform = cancelDialog.policy.platform;
+      const responsePolicy = parseAppUpdatePolicy(payload);
+      if (
+        responsePolicy.id !== dialog.policy.id ||
+        responsePolicy.platform !== dialog.policy.platform ||
+        responsePolicy.status !== "CANCELLED"
+      ) {
+        throw new ApiError("예약 취소 결과 상태를 확인할 수 없습니다.");
+      }
+      const detail = await loadPolicyDetail(responsePolicy.id, controller.signal);
+      const platform = dialog.policy.platform;
+      const refreshed = await refreshPlatform(platform);
+      const activeAfter = refreshed?.find((policy) => policy.status === "ACTIVE") ?? null;
+      if (
+        !refreshed ||
+        detail.status !== "CANCELLED" ||
+        detail.revision !== responsePolicy.revision ||
+        refreshed?.some((policy) => policy.status === "SCHEDULED") ||
+        (activeAfter?.id ?? null) !== dialog.activePolicyIdAtStart
+      ) {
+        throw new ApiError("예약 취소 후 전체 정책 상태를 확인할 수 없습니다.");
+      }
       setCancelDialog(null);
       setFeedback({
         tone: "success",
         title: "예약 정책을 취소했습니다.",
-        message: "현재 활성 정책은 변경되지 않았습니다.",
+        message: "상세 상태가 CANCELLED로 바뀌고 현재 활성 정책이 유지된 것을 확인했습니다.",
       });
-      await refreshPlatform(platform);
     } catch (error) {
       if (controller.signal.aborted) return;
-      const platform = cancelDialog.policy.platform;
-      setCancelDialog(null);
-      if (isAmbiguousMutationError(error)) {
-        await reconcileUnclearMutation(platform, "예약 취소");
+      const platform = dialog.policy.platform;
+      if (mutationSent && isAmbiguousMutationError(error)) {
+        const refreshed = await refreshPlatform(platform);
+        const item = refreshed?.find((policy) => policy.id === dialog.policy.id);
+        if (item?.status === "CANCELLED") {
+          setCancelDialog(null);
+          setFeedback({ tone: "success", title: "예약 취소 완료를 확인했습니다.", message: "최신 서버 상태에서 CANCELLED 전환을 확인했습니다." });
+        } else {
+          setCancelDialog((current) => current ? {
+            ...current,
+            retryReady: true,
+            error: `${safeApiErrorText(error)} 완료 여부를 확인하지 못해 같은 요청으로 다시 시도할 수 있습니다.`,
+          } : null);
+        }
+      } else if (error instanceof ApiError && error.status === 409) {
+        await loadPolicyDetail(dialog.policy.id).catch(() => null);
+        await refreshPlatform(platform);
+        setCancelDialog(null);
+        setFeedback({ tone: "warning", title: "예약 상태가 변경되어 취소하지 않았습니다.", message: safeApiErrorText(error) });
+      } else if (error instanceof ApiError && error.status === 404) {
+        setCancelDialog(null);
+        await refreshPlatform(platform);
+        setFeedback({ tone: "warning", title: "예약 정책을 찾을 수 없습니다.", message: safeApiErrorText(error) });
+      } else if (error instanceof ApiError && error.status === 403) {
+        setPermissionDenied(true);
+        setCancelDialog(null);
+        setFeedback({ tone: "error", title: "관리자 권한이 없습니다.", message: safeApiErrorText(error) });
       } else {
-        if (error instanceof ApiError && error.status === 409) await refreshPlatform(platform);
-        setFeedback({ tone: "error", title: "예약을 취소하지 못했습니다.", message: getErrorText(error) });
+        setCancelDialog((current) => current ? {
+          ...current,
+          idempotencyKey: mutationSent ? createOperationIdempotencyKey() : current.idempotencyKey,
+          error: safeApiErrorText(error),
+        } : null);
       }
     } finally {
       if (mutationController.current === controller) mutationController.current = null;
@@ -1130,21 +1389,24 @@ export default function AppUpdatesPage() {
     setRollbackDialog({
       target,
       active: activePolicy,
+      scheduledPolicyIdAtStart: scheduledPolicy?.id ?? null,
       reason: "",
       confirmation: "",
       idempotencyKey: createOperationIdempotencyKey(),
+      retryReady: false,
       error: "",
     });
   }
 
   async function submitRollback() {
-    if (!rollbackDialog || mutationInProgress.current) return;
-    const reasonError = validateAppUpdateReason(rollbackDialog.reason);
+    const dialog = rollbackDialog;
+    if (!dialog || mutationInProgress.current) return;
+    const reasonError = validateAppUpdateReason(dialog.reason);
     if (reasonError) {
       setRollbackDialog((current) => current ? { ...current, error: reasonError } : null);
       return;
     }
-    if (rollbackDialog.confirmation !== operationConfirmation(rollbackDialog.target)) {
+    if (dialog.confirmation !== operationConfirmation(dialog.target)) {
       setRollbackDialog((current) => current ? { ...current, error: "확인 문구를 정확히 입력해 주세요." } : null);
       return;
     }
@@ -1153,38 +1415,249 @@ export default function AppUpdatesPage() {
     setBusyOperation("rollback");
     const controller = new AbortController();
     mutationController.current = controller;
+    let mutationSent = false;
     try {
-      await apiFetch<unknown>(`${APP_UPDATE_POLICIES_ENDPOINT}/${rollbackDialog.target.id}/rollback`, {
+      if (!dialog.retryReady) {
+        const latestActive = await loadPolicyDetail(dialog.active.id, controller.signal);
+        const latestTarget = await loadPolicyDetail(dialog.target.id, controller.signal);
+        if (
+          latestActive.status !== "ACTIVE" ||
+          latestActive.revision !== dialog.active.revision ||
+          latestTarget.status !== "SUPERSEDED" ||
+          latestTarget.revision !== dialog.target.revision
+        ) {
+          throw new ApiError("롤백 대상이 변경되었습니다.", 409, {
+            message: "현재 정책 또는 롤백 대상이 변경되었습니다. 최신 상태를 확인해 주세요.",
+          });
+        }
+      }
+      mutationSent = true;
+      const payload = await apiFetch<unknown>(`${APP_UPDATE_POLICIES_ENDPOINT}/${dialog.target.id}/rollback`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Idempotency-Key": rollbackDialog.idempotencyKey,
+          "Idempotency-Key": dialog.idempotencyKey,
         },
         body: JSON.stringify({
-          expectedActivePolicyId: rollbackDialog.active.id,
-          expectedActiveRevision: rollbackDialog.active.revision,
-          reason: rollbackDialog.reason.trim(),
+          expectedActivePolicyId: dialog.active.id,
+          expectedActiveRevision: dialog.active.revision,
+          reason: dialog.reason.trim(),
         }),
         signal: controller.signal,
       });
       if (controller.signal.aborted) return;
-      const platform = rollbackDialog.target.platform;
+      const responsePolicy = parseAppUpdatePolicy(payload);
+      if (
+        responsePolicy.status !== "ACTIVE" ||
+        responsePolicy.id === dialog.target.id ||
+        responsePolicy.id === dialog.active.id ||
+        responsePolicy.revision !== 1 ||
+        !samePolicyValues(responsePolicy, dialog.target)
+      ) {
+        throw new ApiError("롤백 결과로 생성된 새 정책을 확인할 수 없습니다.");
+      }
+      const detail = await loadPolicyDetail(responsePolicy.id, controller.signal);
+      const platform = dialog.target.platform;
+      const refreshed = await refreshPlatform(platform);
+      const activeAfter = refreshed?.find((policy) => policy.status === "ACTIVE") ?? null;
+      if (
+        detail.status !== "ACTIVE" || detail.id !== responsePolicy.id || detail.revision !== 1 ||
+        activeAfter?.id !== responsePolicy.id ||
+        refreshed?.some((policy) => policy.status === "SCHEDULED")
+      ) {
+        throw new ApiError("롤백 후 활성 정책 또는 예약 취소 상태를 확인할 수 없습니다.");
+      }
       setRollbackDialog(null);
       setFeedback({
         tone: "success",
-        title: "긴급 완화·롤백 정책을 적용했습니다.",
-        message: "과거 값을 복제한 새 revision이 활성화되었으며 기존 이력은 그대로 보존됩니다.",
+        title: "과거 정책으로 롤백했습니다.",
+        message: `새 정책 #${responsePolicy.id} · rev 1 활성화와 남은 예약 취소를 확인했습니다.`,
       });
-      await refreshPlatform(platform);
     } catch (error) {
       if (controller.signal.aborted) return;
-      const platform = rollbackDialog.target.platform;
-      setRollbackDialog(null);
-      if (isAmbiguousMutationError(error)) {
-        await reconcileUnclearMutation(platform, "롤백");
+      const platform = dialog.target.platform;
+      if (mutationSent && isAmbiguousMutationError(error)) {
+        const refreshed = await refreshPlatform(platform);
+        const activeAfter = refreshed?.find((policy) => policy.status === "ACTIVE") ?? null;
+        if (
+          activeAfter && activeAfter.id !== dialog.active.id && activeAfter.id !== dialog.target.id &&
+          activeAfter.revision === 1 && samePolicyValues(activeAfter, dialog.target) &&
+          !refreshed?.some((policy) => policy.status === "SCHEDULED")
+        ) {
+          setRollbackDialog(null);
+          setFeedback({ tone: "success", title: "롤백 완료를 확인했습니다.", message: `새 정책 #${activeAfter.id} 활성화와 예약 취소를 확인했습니다.` });
+        } else {
+          setRollbackDialog((current) => current ? {
+            ...current,
+            retryReady: true,
+            error: `${safeApiErrorText(error)} 완료 여부를 확인하지 못해 같은 요청으로 다시 시도할 수 있습니다.`,
+          } : null);
+        }
+      } else if (error instanceof ApiError && error.status === 409) {
+        await Promise.all([
+          loadPolicyDetail(dialog.target.id).catch(() => null),
+          loadPolicyDetail(dialog.active.id).catch(() => null),
+        ]);
+        await refreshPlatform(platform);
+        setRollbackDialog(null);
+        setFeedback({ tone: "warning", title: "정책 상태가 변경되어 롤백하지 않았습니다.", message: safeApiErrorText(error) });
+      } else if (error instanceof ApiError && error.status === 404) {
+        setRollbackDialog(null);
+        await refreshPlatform(platform);
+        setFeedback({ tone: "warning", title: "롤백 대상을 찾을 수 없습니다.", message: safeApiErrorText(error) });
+      } else if (error instanceof ApiError && error.status === 403) {
+        setPermissionDenied(true);
+        setRollbackDialog(null);
+        setFeedback({ tone: "error", title: "관리자 권한이 없습니다.", message: safeApiErrorText(error) });
       } else {
-        if (error instanceof ApiError && error.status === 409) await refreshPlatform(platform);
-        setFeedback({ tone: "error", title: "긴급 완화·롤백을 적용하지 못했습니다.", message: getErrorText(error) });
+        setRollbackDialog((current) => current ? {
+          ...current,
+          idempotencyKey: mutationSent ? createOperationIdempotencyKey() : current.idempotencyKey,
+          error: safeApiErrorText(error),
+        } : null);
+      }
+    } finally {
+      if (mutationController.current === controller) mutationController.current = null;
+      mutationInProgress.current = false;
+      setBusyOperation("");
+    }
+  }
+
+  function beginRelax(policy: AppUpdatePolicy) {
+    if (!activePolicy || policy.status !== "DRAFT" || !isAppUpdateRelaxation(policy, activePolicy)) return;
+    setPreview(null);
+    setRelaxDialog({
+      policy,
+      active: activePolicy,
+      scheduledPolicyIdAtStart: scheduledPolicy?.id ?? null,
+      storeAvailabilityConfirmed: false,
+      reason: "",
+      confirmation: "",
+      idempotencyKey: createOperationIdempotencyKey(),
+      retryReady: false,
+      error: "",
+    });
+  }
+
+  async function submitRelax() {
+    const dialog = relaxDialog;
+    if (!dialog || mutationInProgress.current) return;
+    const requestError = validateAppUpdatePolicyRelaxRequest(
+      dialog.policy,
+      dialog.active,
+      dialog.storeAvailabilityConfirmed,
+      dialog.reason,
+    );
+    if (requestError) {
+      setRelaxDialog((current) => current ? { ...current, error: requestError } : null);
+      return;
+    }
+    if (dialog.confirmation !== relaxConfirmation(dialog.policy)) {
+      setRelaxDialog((current) => current ? { ...current, error: "확인 문구를 정확히 입력해 주세요." } : null);
+      return;
+    }
+
+    mutationInProgress.current = true;
+    setBusyOperation("relax");
+    const controller = new AbortController();
+    mutationController.current = controller;
+    let mutationSent = false;
+    try {
+      if (!dialog.retryReady) {
+        const latestActive = await loadPolicyDetail(dialog.active.id, controller.signal);
+        const latestDraft = await loadPolicyDetail(dialog.policy.id, controller.signal);
+        if (
+          latestActive.status !== "ACTIVE" || latestActive.revision !== dialog.active.revision ||
+          latestDraft.status !== "DRAFT" || latestDraft.revision !== dialog.policy.revision ||
+          !isAppUpdateRelaxation(latestDraft, latestActive)
+        ) {
+          throw new ApiError("긴급 완화 대상이 변경되었습니다.", 409, {
+            message: "활성 정책 또는 완화 초안이 변경되었습니다. 최신 상태를 확인해 주세요.",
+          });
+        }
+      }
+      const body = createAppUpdatePolicyRelaxRequest(
+        dialog.policy,
+        dialog.active,
+        true,
+        dialog.reason,
+      );
+      mutationSent = true;
+      const payload = await apiFetch<unknown>(`${APP_UPDATE_POLICIES_ENDPOINT}/${dialog.policy.id}/relax`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Idempotency-Key": dialog.idempotencyKey,
+        },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+      if (controller.signal.aborted) return;
+      const responsePolicy = parseAppUpdatePolicy(payload);
+      if (
+        responsePolicy.id !== dialog.policy.id ||
+        responsePolicy.platform !== dialog.policy.platform ||
+        responsePolicy.status !== "ACTIVE"
+      ) {
+        throw new ApiError("긴급 완화 결과 상태를 확인할 수 없습니다.");
+      }
+      const detail = await loadPolicyDetail(responsePolicy.id, controller.signal);
+      const refreshed = await refreshPlatform(dialog.policy.platform);
+      const activeAfter = refreshed?.find((policy) => policy.status === "ACTIVE") ?? null;
+      if (
+        detail.status !== "ACTIVE" || detail.revision !== responsePolicy.revision ||
+        activeAfter?.id !== dialog.policy.id ||
+        refreshed?.some((policy) => policy.status === "SCHEDULED")
+      ) {
+        throw new ApiError("긴급 완화 후 활성 정책 또는 예약 취소 상태를 확인할 수 없습니다.");
+      }
+      setRelaxDialog(null);
+      setEditor(null);
+      setFeedback({
+        tone: "success",
+        title: "강제 조건을 긴급 완화했습니다.",
+        message: `정책 #${detail.id} 활성화와 같은 플랫폼의 남은 예약 취소를 확인했습니다.`,
+      });
+    } catch (error) {
+      if (controller.signal.aborted) return;
+      const platform = dialog.policy.platform;
+      if (mutationSent && isAmbiguousMutationError(error)) {
+        const refreshed = await refreshPlatform(platform);
+        const activeAfter = refreshed?.find((policy) => policy.status === "ACTIVE") ?? null;
+        if (activeAfter?.id === dialog.policy.id && !refreshed?.some((policy) => policy.status === "SCHEDULED")) {
+          setRelaxDialog(null);
+          setEditor(null);
+          setFeedback({ tone: "success", title: "긴급 완화 완료를 확인했습니다.", message: "활성 정책 전환과 예약 취소를 최신 서버 상태에서 확인했습니다." });
+        } else {
+          setRelaxDialog((current) => current ? {
+            ...current,
+            retryReady: true,
+            error: `${safeApiErrorText(error)} 완료 여부를 확인하지 못해 같은 요청으로 다시 시도할 수 있습니다.`,
+          } : null);
+        }
+      } else if (error instanceof ApiError && error.status === 409) {
+        await Promise.all([
+          loadPolicyDetail(dialog.policy.id).catch(() => null),
+          loadPolicyDetail(dialog.active.id).catch(() => null),
+        ]);
+        await refreshPlatform(platform);
+        setRelaxDialog(null);
+        setFeedback({ tone: "warning", title: "정책 상태가 변경되어 완화하지 않았습니다.", message: safeApiErrorText(error) });
+      } else if (error instanceof ApiError && error.status === 404) {
+        setRelaxDialog(null);
+        setEditor(null);
+        await refreshPlatform(platform);
+        setFeedback({ tone: "warning", title: "긴급 완화 대상을 찾을 수 없습니다.", message: safeApiErrorText(error) });
+      } else if (error instanceof ApiError && error.status === 403) {
+        setPermissionDenied(true);
+        setRelaxDialog(null);
+        setFeedback({ tone: "error", title: "관리자 권한이 없습니다.", message: safeApiErrorText(error) });
+      } else {
+        setRelaxDialog((current) => current ? {
+          ...current,
+          idempotencyKey: mutationSent ? createOperationIdempotencyKey() : current.idempotencyKey,
+          error: safeApiErrorText(error),
+        } : null);
       }
     } finally {
       if (mutationController.current === controller) mutationController.current = null;
@@ -1209,10 +1682,20 @@ export default function AppUpdatesPage() {
     if (filters.eventType) query.set("eventType", filters.eventType);
     if (actorId) query.set("actorId", actorId);
     try {
-      if (filters.from) query.set("from", kstDateTimeToUtcIso(filters.from));
-      if (filters.to) query.set("to", kstDateTimeToUtcIso(filters.to));
+      const fromUtc = filters.from ? kstDateTimeToUtcIso(filters.from) : "";
+      const toUtc = filters.to ? kstDateTimeToUtcIso(filters.to) : "";
+      if (fromUtc && toUtc && Date.parse(fromUtc) >= Date.parse(toUtc)) {
+        setAuditDialog((current) => ({
+          ...current,
+          status: "error",
+          error: "시작 시각은 종료 시각보다 빨라야 합니다.",
+        }));
+        return;
+      }
+      if (fromUtc) query.set("from", fromUtc);
+      if (toUtc) query.set("to", toUtc);
     } catch (error) {
-      setAuditDialog((current) => ({ ...current, status: "error", error: getErrorText(error) }));
+      setAuditDialog((current) => ({ ...current, status: "error", error: safeApiErrorText(error) }));
       return;
     }
 
@@ -1230,7 +1713,8 @@ export default function AppUpdatesPage() {
       setAuditDialog((current) => ({ ...current, status: "ready", data, error: "" }));
     } catch (error) {
       if (controller.signal.aborted) return;
-      setAuditDialog((current) => ({ ...current, status: "error", error: getErrorText(error) }));
+      if (error instanceof ApiError && error.status === 403) setPermissionDenied(true);
+      setAuditDialog((current) => ({ ...current, status: "error", error: safeApiErrorText(error) }));
     } finally {
       if (auditController.current === controller) auditController.current = null;
     }
@@ -1301,6 +1785,26 @@ export default function AppUpdatesPage() {
             <p>스토어에서 대상 빌드를 실제로 설치할 수 있는지 확인한 뒤 게시하세요. iOS와 Android는 서로 영향을 주지 않습니다.</p>
           </div>
         </section>
+
+        <details className={styles.quickGuide} open>
+          <summary><Info size={18} weight="fill" aria-hidden="true" /> 처음 사용하는 분을 위한 3단계 가이드</summary>
+          <ol className={styles.guideSteps}>
+            <li><strong>초안 작성</strong><span>플랫폼을 고르고 버전·빌드·안내 문구를 저장합니다.</span></li>
+            <li><strong>미리보기 확인</strong><span>빌드별로 진입 허용·선택·강제 판정이 맞는지 봅니다.</span></li>
+            <li><strong>적용 방식 선택</strong><span>일반 변경은 게시, 과거 값 복원은 롤백, 강제 기준을 낮추면 긴급 완화를 사용합니다.</span></li>
+          </ol>
+          <p className={styles.guideNote}>초안 저장만으로는 사용자 앱에 반영되지 않습니다. 미리보기 뒤 게시·롤백·긴급 완화 중 맞는 작업을 완료해야 적용됩니다.</p>
+        </details>
+
+        {permissionDenied && (
+          <section className={styles.loadError} role="alert">
+            <ShieldWarning size={24} weight="fill" aria-hidden="true" />
+            <div>
+              <strong>이 계정에는 앱 업데이트 정책 관리 권한이 없습니다.</strong>
+              <p>앱 업데이트 관리 권한이 있는 계정으로 다시 로그인하거나 시스템 관리자에게 권한을 요청해 주세요.</p>
+            </div>
+          </section>
+        )}
 
         <div className={styles.platformTabs} role="tablist" aria-label="앱 플랫폼">
           {APP_UPDATE_PLATFORMS.map((platform) => {
@@ -1401,6 +1905,9 @@ export default function AppUpdatesPage() {
                       </a>
                     </div>
                     <div className={styles.cardActions}>
+                      <button className="button button-secondary" type="button" disabled={savingDraft || currentState.status !== "ready"} onClick={() => void openPreview(activePolicy)}>
+                        <Eye size={16} aria-hidden="true" /> 판정 미리보기
+                      </button>
                       <button className="button button-secondary" type="button" disabled={savingDraft || currentState.status !== "ready"} onClick={startFromActive}>
                         <Copy size={16} aria-hidden="true" />
                         현재 값으로 초안 시작
@@ -1435,6 +1942,9 @@ export default function AppUpdatesPage() {
                       </a>
                     </div>
                     <div className={styles.cardActions}>
+                      <button className="button button-secondary" type="button" disabled={savingDraft || currentState.status !== "ready"} onClick={() => void openPreview(scheduledPolicy)}>
+                        <Eye size={16} aria-hidden="true" /> 판정 미리보기
+                      </button>
                       <button className="button button-danger-subtle" type="button" disabled={savingDraft || currentState.status !== "ready"} onClick={() => beginCancel(scheduledPolicy)}>
                         <Prohibit size={16} aria-hidden="true" />
                         예약 취소
@@ -1469,9 +1979,10 @@ export default function AppUpdatesPage() {
               ) : recentAudit.item ? (
                 <div className={styles.recentChangeGrid}>
                   <div><span>작업</span><strong>{auditEventLabels[recentAudit.item.eventType] ?? recentAudit.item.eventType}</strong></div>
-                  <div><span>작업자</span><strong>관리자 #{recentAudit.item.actorId}</strong></div>
-                  <div><span>시각</span><strong>{formatTimestamp(recentAudit.item.occurredAt)}</strong></div>
+                  <div><span>작업자</span><strong>{recentAudit.item.actorId === null ? "서버 자동 작업" : `관리자 #${recentAudit.item.actorId}`}</strong></div>
+                  <div><span>시각</span><strong>{formatTimestamp(recentAudit.item.createdAt)}</strong></div>
                   <div className={styles.reasonCell}><span>내부 변경 사유</span><strong>{recentAudit.item.reason}</strong></div>
+                  {recentAudit.item.failureMessage && <div className={styles.reasonCell}><span>실패 메시지</span><strong>{recentAudit.item.failureMessage}</strong></div>}
                 </div>
               ) : (
                 <span className={styles.mutedInline}>아직 기록된 변경 이력이 없습니다.</span>
@@ -1499,7 +2010,9 @@ export default function AppUpdatesPage() {
                   {draftPolicies.map((policy) => (
                     <article className={styles.draftItem} key={policy.id}>
                       <div className={styles.draftMain}>
-                        <span className={`${styles.statusBadge} ${styles.draftStatus}`}>초안 · rev {policy.revision}</span>
+                        <span className={`${styles.statusBadge} ${styles.draftStatus}`}>
+                          {isAppUpdateRelaxation(policy, activePolicy) ? "긴급 완화 초안" : "초안"} · rev {policy.revision}
+                        </span>
                         <h4>{policy.latestVersion} · 빌드 {policy.latestBuild}</h4>
                         <p>{policy.forceUpdateEnabled ? `최소 지원 빌드 ${policy.minimumSupportedBuild}` : "강제 업데이트 미사용"} · 선택 안내 {policy.optionalUpdateEnabled ? "사용" : "미사용"}</p>
                         <small>마지막 수정 {formatTimestamp(policy.updatedAt)} · 관리자 #{policy.updatedBy}</small>
@@ -1518,13 +2031,38 @@ export default function AppUpdatesPage() {
               )}
             </section>
 
+            <section className={styles.historySection} aria-labelledby="emergency-relax-title">
+              <div className={styles.sectionHeadingRow}>
+                <div className={styles.sectionHeading}>
+                  <div className={styles.sectionIcon} aria-hidden="true"><ShieldWarning size={20} /></div>
+                  <div>
+                    <h3 id="emergency-relax-title">강제 조건 긴급 완화</h3>
+                    <p>현재 최소 지원 빌드를 낮추거나 강제 업데이트를 끌 때만 사용합니다. 완화용 초안을 만든 뒤 별도 긴급 완화 절차로 적용합니다.</p>
+                  </div>
+                </div>
+                <button
+                  className="button button-danger-subtle"
+                  type="button"
+                  disabled={savingDraft || currentState.status !== "ready" || !activePolicy?.forceUpdateEnabled}
+                  onClick={startRelaxationDraft}
+                >
+                  <ShieldWarning size={17} aria-hidden="true" /> 완화 초안 만들기
+                </button>
+              </div>
+              <div className={styles.impactNote}>
+                <Info size={18} aria-hidden="true" />
+                <div><strong>일반 게시와 다른 작업</strong><span>긴급 완화 전용 절차</span></div>
+                <p>{activePolicy?.forceUpdateEnabled ? "완료 시 같은 플랫폼의 예약 정책도 서버가 함께 취소합니다." : "현재 강제 업데이트가 꺼져 있어 완화할 조건이 없습니다."}</p>
+              </div>
+            </section>
+
             <section className={styles.historySection} aria-labelledby="policy-history-title">
               <div className={styles.sectionHeadingRow}>
                 <div className={styles.sectionHeading}>
                   <div className={styles.sectionIcon} aria-hidden="true"><ClockCounterClockwise size={20} /></div>
                   <div>
-                    <h3 id="policy-history-title">이전 정책과 긴급 완화</h3>
-                    <p>활성 정책은 삭제하지 않습니다. 과거 값을 복제한 새 revision으로만 롤백합니다.</p>
+                    <h3 id="policy-history-title">과거 정책 롤백</h3>
+                    <p>SUPERSEDED 정책을 복제해 새 ID·revision 1의 활성 정책을 만듭니다. 긴급 완화와는 별도 작업입니다.</p>
                   </div>
                 </div>
                 <button className="button button-secondary" type="button" onClick={openAuditHistory}>전체 변경 이력</button>
@@ -1551,11 +2089,16 @@ export default function AppUpdatesPage() {
                           <td>{policy.forceUpdateEnabled ? `빌드 ${policy.minimumSupportedBuild} 미만` : "사용 안 함"}</td>
                           <td>{formatTimestamp(policy.effectiveAt)}</td>
                           <td>
-                            {policy.status === "SUPERSEDED" && activePolicy && (
-                              <button className={styles.rollbackButton} type="button" disabled={savingDraft || currentState.status !== "ready"} onClick={() => beginRollback(policy)}>
-                                긴급 완화·롤백
+                            <div className={styles.draftActions}>
+                              <button className="button button-secondary" type="button" disabled={savingDraft || currentState.status !== "ready"} onClick={() => void openPreview(policy)}>
+                                <Eye size={15} aria-hidden="true" /> 미리보기
                               </button>
-                            )}
+                              {policy.status === "SUPERSEDED" && activePolicy && (
+                                <button className={styles.rollbackButton} type="button" disabled={savingDraft || currentState.status !== "ready"} onClick={() => beginRollback(policy)}>
+                                  이 정책으로 롤백
+                                </button>
+                              )}
+                            </div>
                           </td>
                         </tr>
                       ))}
@@ -1584,9 +2127,9 @@ export default function AppUpdatesPage() {
           <section className={styles.editor} aria-labelledby="policy-editor-title">
             <div className={styles.editorHeader}>
               <div>
-                <span className={styles.eyebrow}>{editor.mode === "create" ? "새 정책 초안" : `초안 #${editor.policy?.id} · rev ${editor.policy?.revision}`}</span>
-                <h3 id="policy-editor-title">{platformLabel(editor.form.platform)} 업데이트 정책 작성</h3>
-                <p>표시 버전은 안내용이며 실제 판정은 단조 증가하는 정수 빌드 번호로 처리합니다.</p>
+                <span className={styles.eyebrow}>{editorIsRelaxation ? "강제 조건 긴급 완화용 초안" : editor.mode === "create" ? "새 정책 초안" : `초안 #${editor.policy?.id} · rev ${editor.policy?.revision}`}</span>
+                <h3 id="policy-editor-title">{platformLabel(editor.form.platform)} {editorIsRelaxation ? "긴급 완화 초안" : "업데이트 정책"} 작성</h3>
+                <p>{editorIsRelaxation ? "이 초안은 일반 게시가 아닌 긴급 완화 절차로만 적용됩니다." : "표시 버전은 안내용이며 실제 판정은 단조 증가하는 정수 빌드 번호로 처리합니다."}</p>
               </div>
               <button className={styles.editorClose} type="button" aria-label="정책 작성 닫기" disabled={savingDraft} onClick={requestEditorClose}>
                 <X size={20} aria-hidden="true" />
@@ -1759,7 +2302,7 @@ export default function AppUpdatesPage() {
             </fieldset>
 
             <div className={styles.editorFooter}>
-              <p><Info size={16} aria-hidden="true" /> 저장하면 DRAFT가 되며 사용자 앱에는 아직 적용되지 않습니다.</p>
+              <p><Info size={16} aria-hidden="true" /> 저장하면 DRAFT가 되며 사용자 앱에는 아직 적용되지 않습니다. {editorIsRelaxation && "미리보기 후 긴급 완화로 적용하세요."}</p>
               <div>
                 <button className="button button-secondary" type="button" disabled={savingDraft} onClick={requestEditorClose}>닫기</button>
                 <button className="button button-primary" type="button" disabled={savingDraft || currentState.status !== "ready"} onClick={() => void saveDraft()}>
@@ -1796,8 +2339,8 @@ export default function AppUpdatesPage() {
       {preview && (
         <DialogShell
           titleId="app-update-preview-title"
-          title="게시 전 미리보기"
-          description="실제 앱 안내와 서버가 판정한 빌드 경계값을 함께 확인합니다."
+          title={preview.policy.status === "DRAFT" ? "정책 적용 전 미리보기" : `${policyStatusLabels[preview.policy.status]} 정책 미리보기`}
+          description="정책을 변경하지 않고 실제 앱 안내와 서버가 판정한 빌드 경계값을 확인합니다."
           wide
           onClose={() => {
             previewController.current?.abort();
@@ -1840,8 +2383,8 @@ export default function AppUpdatesPage() {
                 <section className={styles.previewDetails} aria-labelledby="server-decision-title">
                   <div className={styles.previewMeta}>
                     <div><span>플랫폼</span><strong>{platformLabel(preview.policy.platform)}</strong></div>
-                    <div><span>초안 revision</span><strong>{preview.policy.revision}</strong></div>
-                    <div><span>게시 방식</span><strong>다음 단계에서 즉시·예약 선택</strong></div>
+                    <div><span>정책 상태·revision</span><strong>{policyStatusLabels[preview.policy.status]} · rev {preview.policy.revision}</strong></div>
+                    <div><span>다음 작업</span><strong>{preview.policy.status === "DRAFT" ? (isAppUpdateRelaxation(preview.policy, activePolicy) ? "긴급 완화로 적용" : "즉시·예약 게시") : "조회만 가능"}</strong></div>
                     <div><span>스토어</span><a href={preview.policy.storeUrl} target="_blank" rel="noreferrer">링크 테스트 <ArrowSquareOut size={14} /></a></div>
                   </div>
                   <h3 id="server-decision-title">서버 판정 경계값</h3>
@@ -1889,9 +2432,17 @@ export default function AppUpdatesPage() {
 
               <div className={styles.dialogActions}>
                 <button className="button button-secondary" type="button" onClick={() => setPreview(null)}>닫기</button>
-                <button className="button button-primary" type="button" disabled={!selectedPreviewResult} onClick={() => beginPublish(preview.policy)}>
-                  <RocketLaunch size={17} aria-hidden="true" /> 게시 설정으로
-                </button>
+                {preview.policy.status === "DRAFT" && (
+                  isAppUpdateRelaxation(preview.policy, activePolicy) ? (
+                    <button className="button button-danger" type="button" disabled={!selectedPreviewResult} onClick={() => beginRelax(preview.policy)}>
+                      <ShieldWarning size={17} aria-hidden="true" /> 긴급 완화 확인으로
+                    </button>
+                  ) : (
+                    <button className="button button-primary" type="button" disabled={!selectedPreviewResult} onClick={() => beginPublish(preview.policy)}>
+                      <RocketLaunch size={17} aria-hidden="true" /> 게시 설정으로
+                    </button>
+                  )
+                )}
               </div>
             </div>
           ) : null}
@@ -1916,7 +2467,7 @@ export default function AppUpdatesPage() {
                 <strong>{publishDialog.mode === "IMMEDIATE" ? "확인 즉시" : publishDialog.effectiveAt ? `${publishDialog.effectiveAt.replace("T", " ")} KST` : "예약 시각 입력 필요"}</strong>
               </div>
             </div>
-            <fieldset className={styles.modeFieldset} disabled={busyOperation === "publish"}>
+            <fieldset className={styles.modeFieldset} disabled={busyOperation === "publish" || publishDialog.retryReady}>
               <legend>게시 방식</legend>
               <label className={publishDialog.mode === "IMMEDIATE" ? styles.selectedMode : ""}>
                 <input
@@ -1947,7 +2498,7 @@ export default function AppUpdatesPage() {
                 <input
                   id="publish-effective-at"
                   type="datetime-local"
-                  disabled={busyOperation === "publish"}
+                  disabled={busyOperation === "publish" || publishDialog.retryReady}
                   value={publishDialog.effectiveAt}
                   onChange={(event) => setPublishDialog((current) => current ? { ...current, effectiveAt: event.target.value, error: "" } : null)}
                 />
@@ -1959,7 +2510,7 @@ export default function AppUpdatesPage() {
                 id="publish-reason"
                 rows={3}
                 maxLength={500}
-                disabled={busyOperation === "publish"}
+                disabled={busyOperation === "publish" || publishDialog.retryReady}
                 value={publishDialog.reason}
                 onChange={(event) => setPublishDialog((current) => current ? { ...current, reason: event.target.value, error: "" } : null)}
               />
@@ -1967,7 +2518,7 @@ export default function AppUpdatesPage() {
             <label className={styles.storeConfirmation}>
               <input
                 type="checkbox"
-                disabled={busyOperation === "publish"}
+                disabled={busyOperation === "publish" || publishDialog.retryReady}
                 checked={publishDialog.storeAvailabilityConfirmed}
                 onChange={(event) => setPublishDialog((current) => current ? { ...current, storeAvailabilityConfirmed: event.target.checked, error: "" } : null)}
               />
@@ -1981,7 +2532,7 @@ export default function AppUpdatesPage() {
               <input
                 id="publish-confirmation"
                 autoComplete="off"
-                disabled={busyOperation === "publish"}
+                disabled={busyOperation === "publish" || publishDialog.retryReady}
                 value={publishDialog.confirmation}
                 onChange={(event) => setPublishDialog((current) => current ? { ...current, confirmation: event.target.value, error: "" } : null)}
               />
@@ -1991,7 +2542,7 @@ export default function AppUpdatesPage() {
               <button className="button button-secondary" type="button" disabled={busyOperation === "publish"} onClick={() => setPublishDialog(null)}>취소</button>
               <button className="button button-primary" type="button" disabled={busyOperation === "publish"} onClick={() => void submitPublish()}>
                 {busyOperation === "publish" ? <SpinnerGap className={styles.spinner} size={17} /> : <RocketLaunch size={17} />}
-                {busyOperation === "publish" ? "처리 중" : publishDialog.mode === "IMMEDIATE" ? "즉시 게시" : "예약 게시"}
+                {busyOperation === "publish" ? "처리 중" : publishDialog.retryReady ? "같은 요청 다시 시도" : publishDialog.mode === "IMMEDIATE" ? "즉시 게시" : "예약 게시"}
               </button>
             </div>
           </div>
@@ -2014,14 +2565,14 @@ export default function AppUpdatesPage() {
             </div>
             <div className={styles.dialogField}>
               <label htmlFor="cancel-reason">취소 사유 <span>필수 · 10~500자</span></label>
-              <textarea id="cancel-reason" rows={4} maxLength={500} disabled={busyOperation === "cancel"} value={cancelDialog.reason} onChange={(event) => setCancelDialog((current) => current ? { ...current, reason: event.target.value, error: "" } : null)} />
+              <textarea id="cancel-reason" rows={4} maxLength={500} disabled={busyOperation === "cancel" || cancelDialog.retryReady} value={cancelDialog.reason} onChange={(event) => setCancelDialog((current) => current ? { ...current, reason: event.target.value, error: "" } : null)} />
             </div>
             {cancelDialog.error && <p className={styles.operationError} role="alert">{cancelDialog.error}</p>}
             <div className={styles.dialogActions}>
               <button className="button button-secondary" type="button" disabled={busyOperation === "cancel"} onClick={() => setCancelDialog(null)}>돌아가기</button>
               <button className="button button-danger" type="button" disabled={busyOperation === "cancel"} onClick={() => void submitCancel()}>
                 {busyOperation === "cancel" ? <SpinnerGap className={styles.spinner} size={17} /> : <Prohibit size={17} />}
-                {busyOperation === "cancel" ? "처리 중" : "예약 취소"}
+                {busyOperation === "cancel" ? "처리 중" : cancelDialog.retryReady ? "같은 요청 다시 시도" : "예약 취소"}
               </button>
             </div>
           </div>
@@ -2031,7 +2582,7 @@ export default function AppUpdatesPage() {
       {rollbackDialog && (
         <DialogShell
           titleId="app-update-rollback-title"
-          title="긴급 완화·롤백"
+          title="과거 정책 롤백"
           description="과거 정책 행을 다시 활성화하지 않고, 선택한 값을 복제한 새 revision을 즉시 게시합니다."
           busy={busyOperation === "rollback"}
           onClose={() => setRollbackDialog(null)}
@@ -2048,20 +2599,88 @@ export default function AppUpdatesPage() {
               <CaretRight size={18} aria-hidden="true" />
               <div><span>복원할 최소 지원</span><strong>{rollbackDialog.target.minimumSupportedBuild ?? "설정 안 함"}</strong></div>
             </div>
+            <div className={styles.impactNote}>
+              <Info size={18} aria-hidden="true" />
+              <div>
+                <strong>예약 정책 처리</strong>
+                <span>{rollbackDialog.scheduledPolicyIdAtStart ? `정책 #${rollbackDialog.scheduledPolicyIdAtStart} 함께 취소` : "남은 예약 없음"}</span>
+              </div>
+              <p>롤백을 적용하면 같은 플랫폼의 남은 예약은 서버에서 함께 취소합니다.</p>
+            </div>
             <div className={styles.dialogField}>
-              <label htmlFor="rollback-reason">긴급 완화 사유 <span>필수 · 감사 로그 저장</span></label>
-              <textarea id="rollback-reason" rows={4} maxLength={500} disabled={busyOperation === "rollback"} value={rollbackDialog.reason} onChange={(event) => setRollbackDialog((current) => current ? { ...current, reason: event.target.value, error: "" } : null)} />
+              <label htmlFor="rollback-reason">롤백 사유 <span>필수 · 감사 로그 저장</span></label>
+              <textarea id="rollback-reason" rows={4} maxLength={500} disabled={busyOperation === "rollback" || rollbackDialog.retryReady} value={rollbackDialog.reason} onChange={(event) => setRollbackDialog((current) => current ? { ...current, reason: event.target.value, error: "" } : null)} />
             </div>
             <div className={styles.confirmPhrase}>
               <label htmlFor="rollback-confirmation">계속하려면 <strong>{operationConfirmation(rollbackDialog.target)}</strong> 입력</label>
-              <input id="rollback-confirmation" autoComplete="off" disabled={busyOperation === "rollback"} value={rollbackDialog.confirmation} onChange={(event) => setRollbackDialog((current) => current ? { ...current, confirmation: event.target.value, error: "" } : null)} />
+              <input id="rollback-confirmation" autoComplete="off" disabled={busyOperation === "rollback" || rollbackDialog.retryReady} value={rollbackDialog.confirmation} onChange={(event) => setRollbackDialog((current) => current ? { ...current, confirmation: event.target.value, error: "" } : null)} />
             </div>
             {rollbackDialog.error && <p className={styles.operationError} role="alert">{rollbackDialog.error}</p>}
             <div className={styles.dialogActions}>
               <button className="button button-secondary" type="button" disabled={busyOperation === "rollback"} onClick={() => setRollbackDialog(null)}>취소</button>
               <button className="button button-danger" type="button" disabled={busyOperation === "rollback"} onClick={() => void submitRollback()}>
                 {busyOperation === "rollback" ? <SpinnerGap className={styles.spinner} size={17} /> : <ShieldWarning size={17} />}
-                {busyOperation === "rollback" ? "처리 중" : "새 revision으로 롤백"}
+                {busyOperation === "rollback" ? "처리 중" : rollbackDialog.retryReady ? "같은 요청 다시 시도" : "새 정책으로 롤백"}
+              </button>
+            </div>
+          </div>
+        </DialogShell>
+      )}
+
+      {relaxDialog && (
+        <DialogShell
+          titleId="app-update-relax-title"
+          title="강제 조건 긴급 완화"
+          description="완화용 초안을 활성화하고 같은 플랫폼의 남은 예약 정책을 함께 취소합니다. 과거 정책 롤백과는 다른 작업입니다."
+          busy={busyOperation === "relax"}
+          onClose={() => setRelaxDialog(null)}
+        >
+          <div className={styles.operationBody}>
+            <div className={`${styles.operationSummary} ${styles.publishSummary} ${styles.dangerSummary}`}>
+              <div><span>플랫폼</span><strong>{platformLabel(relaxDialog.policy.platform)}</strong></div>
+              <div><span>현재 강제 기준</span><strong>{relaxDialog.active.forceUpdateEnabled ? `빌드 ${relaxDialog.active.minimumSupportedBuild} 미만` : "사용 안 함"}</strong></div>
+              <div><span>완화 후 기준</span><strong>{relaxDialog.policy.forceUpdateEnabled ? `빌드 ${relaxDialog.policy.minimumSupportedBuild} 미만` : "강제 해제"}</strong></div>
+              <div><span>예약 처리</span><strong>{relaxDialog.scheduledPolicyIdAtStart ? `정책 #${relaxDialog.scheduledPolicyIdAtStart} 함께 취소` : "남은 예약 없음"}</strong></div>
+            </div>
+            <label className={styles.storeConfirmation}>
+              <input
+                type="checkbox"
+                disabled={busyOperation === "relax" || relaxDialog.retryReady}
+                checked={relaxDialog.storeAvailabilityConfirmed}
+                onChange={(event) => setRelaxDialog((current) => current ? { ...current, storeAvailabilityConfirmed: event.target.checked, error: "" } : null)}
+              />
+              <span>
+                <strong>스토어 배포 상태를 확인했습니다.</strong>
+                <small>대상 국가·트랙에서 빌드 {relaxDialog.policy.latestBuild}을 실제로 설치할 수 있습니다.</small>
+              </span>
+            </label>
+            <div className={styles.dialogField}>
+              <label htmlFor="relax-reason">긴급 완화 사유 <span>필수 · 10~500자 · 감사 로그 저장</span></label>
+              <textarea
+                id="relax-reason"
+                rows={4}
+                maxLength={500}
+                disabled={busyOperation === "relax" || relaxDialog.retryReady}
+                value={relaxDialog.reason}
+                onChange={(event) => setRelaxDialog((current) => current ? { ...current, reason: event.target.value, error: "" } : null)}
+              />
+            </div>
+            <div className={styles.confirmPhrase}>
+              <label htmlFor="relax-confirmation">계속하려면 <strong>{relaxConfirmation(relaxDialog.policy)}</strong> 입력</label>
+              <input
+                id="relax-confirmation"
+                autoComplete="off"
+                disabled={busyOperation === "relax" || relaxDialog.retryReady}
+                value={relaxDialog.confirmation}
+                onChange={(event) => setRelaxDialog((current) => current ? { ...current, confirmation: event.target.value, error: "" } : null)}
+              />
+            </div>
+            {relaxDialog.error && <p className={styles.operationError} role="alert">{relaxDialog.error}</p>}
+            <div className={styles.dialogActions}>
+              <button className="button button-secondary" type="button" disabled={busyOperation === "relax"} onClick={() => setRelaxDialog(null)}>취소</button>
+              <button className="button button-danger" type="button" disabled={busyOperation === "relax"} onClick={() => void submitRelax()}>
+                {busyOperation === "relax" ? <SpinnerGap className={styles.spinner} size={17} /> : <ShieldWarning size={17} />}
+                {busyOperation === "relax" ? "처리 중" : relaxDialog.retryReady ? "같은 요청 다시 시도" : "긴급 완화 적용"}
               </button>
             </div>
           </div>
@@ -2090,11 +2709,9 @@ export default function AppUpdatesPage() {
               <label>작업 유형
                 <select value={auditDialog.filters.eventType} onChange={(event) => setAuditDialog((current) => ({ ...current, filters: { ...current.filters, eventType: event.target.value } }))}>
                   <option value="">전체</option>
-                  <option value="CREATE">초안 생성</option>
-                  <option value="UPDATE">초안 수정</option>
-                  <option value="PUBLISH">게시</option>
-                  <option value="CANCEL">예약 취소</option>
-                  <option value="ROLLBACK">롤백</option>
+                  {APP_UPDATE_AUDIT_EVENT_TYPES.map((eventType) => (
+                    <option key={eventType} value={eventType}>{auditEventLabels[eventType]}</option>
+                  ))}
                 </select>
               </label>
               <label>작업자 ID
@@ -2121,35 +2738,37 @@ export default function AppUpdatesPage() {
               <>
                 <div className={styles.auditList}>
                   {auditDialog.data.items.map((log, index) => (
-                    <article className={styles.auditItem} key={log.id ?? `${log.policyId}-${log.revision}-${log.occurredAt}-${index}`}>
+                    <article className={styles.auditItem} key={`${log.id}-${log.createdAt}-${index}`}>
                       <div className={styles.auditItemHeader}>
                         <div>
                           <span className={`${styles.statusBadge} ${log.success ? styles.activeStatus : styles.cancelledStatus}`}>{log.success ? "성공" : "실패"}</span>
                           <h3>{auditEventLabels[log.eventType] ?? log.eventType}</h3>
                         </div>
-                        <time dateTime={log.occurredAt}>{formatTimestamp(log.occurredAt)}</time>
+                        <time dateTime={log.createdAt}>{formatTimestamp(log.createdAt)}</time>
                       </div>
                       <div className={styles.auditMeta}>
-                        <span>정책 #{log.policyId} · rev {log.revision}</span>
-                        <span>작업자 #{log.actorId}</span>
+                        <span>정책 {log.policyId === null ? "-" : `#${log.policyId}`} · rev {log.revision ?? "-"}</span>
+                        <span>플랫폼 {log.platform ? platformLabel(log.platform) : "-"}</span>
+                        <span>작업자 {log.actorId === null ? "서버 자동" : `#${log.actorId}`}</span>
                         <span>게시자 {log.publishedBy ? `#${log.publishedBy}` : "-"}</span>
                         <span>게시 시각 {formatTimestamp(log.publishedAt)}</span>
                       </div>
                       <p className={styles.auditReason}><strong>내부 사유</strong>{log.reason}</p>
+                      {log.failureMessage && <p className={styles.operationError} role="alert"><strong>실패 메시지</strong> {log.failureMessage}</p>}
                       <div className={styles.auditDetailsGrid}>
                         <details>
                           <summary>변경 전 정책 전체 값</summary>
-                          <pre>{policySnapshot(log.beforePolicy)}</pre>
+                          <pre>{policySnapshot(log.beforeSnapshot)}</pre>
                         </details>
                         <details>
                           <summary>변경 후 정책 전체 값</summary>
-                          <pre>{policySnapshot(log.afterPolicy)}</pre>
+                          <pre>{policySnapshot(log.afterSnapshot)}</pre>
                         </details>
                         <details className={styles.requestDetails}>
                           <summary>요청 정보</summary>
                           <dl>
-                            <div><dt>요청 IP</dt><dd>{log.requestIp}</dd></div>
-                            <div><dt>User-Agent</dt><dd>{log.userAgent}</dd></div>
+                            <div><dt>요청 IP</dt><dd>{log.requestIp ?? "-"}</dd></div>
+                            <div><dt>User-Agent</dt><dd>{log.userAgent ?? "-"}</dd></div>
                             <div><dt>request ID</dt><dd>{log.requestId}</dd></div>
                           </dl>
                         </details>

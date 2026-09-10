@@ -156,6 +156,109 @@
   line-height: 1.55;
 }
 
+.quickGuide {
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-panel, 18px);
+  background: var(--white);
+  box-shadow: var(--shadow-sm);
+}
+
+.quickGuide summary {
+  display: flex;
+  min-height: 58px;
+  align-items: center;
+  gap: 10px;
+  padding: 15px 18px;
+  color: var(--ink-900);
+  font-size: 0.88rem;
+  font-weight: 760;
+  cursor: pointer;
+  list-style: none;
+}
+
+.quickGuide summary::-webkit-details-marker {
+  display: none;
+}
+
+.quickGuide summary::after {
+  margin-left: auto;
+  color: var(--brand-primary);
+  content: "+";
+  font-size: 1.15rem;
+  line-height: 1;
+}
+
+.quickGuide[open] summary::after {
+  content: "−";
+}
+
+.quickGuide summary:focus-visible {
+  outline: 3px solid rgba(20, 103, 143, 0.22);
+  outline-offset: -3px;
+}
+
+.guideSteps {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin: 0;
+  padding: 0 18px 18px;
+  list-style: none;
+}
+
+.guideSteps li {
+  position: relative;
+  min-width: 0;
+  padding: 15px 15px 15px 48px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-raised, #f8fafb);
+}
+
+.guideSteps li::before {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  display: grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  border-radius: 8px;
+  color: var(--white);
+  background: var(--brand-primary);
+  content: counter(list-item);
+  font-size: 0.75rem;
+  font-weight: 780;
+}
+
+.guideSteps strong,
+.guideSteps span {
+  display: block;
+}
+
+.guideSteps strong {
+  color: var(--ink-900);
+  font-size: 0.82rem;
+}
+
+.guideSteps span {
+  margin-top: 4px;
+  color: var(--ink-500);
+  font-size: 0.76rem;
+  line-height: 1.5;
+}
+
+.guideNote {
+  margin: -4px 18px 18px;
+  padding: 11px 13px;
+  border-radius: 10px;
+  color: var(--warning);
+  background: var(--warning-bg);
+  font-size: 0.76rem;
+  line-height: 1.5;
+}
+
 .feedback {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
@@ -1813,7 +1916,8 @@
   .formGrid,
   .previewGrid,
   .modeFieldset,
-  .auditDetailsGrid {
+  .auditDetailsGrid,
+  .guideSteps {
     grid-template-columns: 1fr;
   }
 
