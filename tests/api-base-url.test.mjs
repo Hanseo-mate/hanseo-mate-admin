@@ -35,3 +35,17 @@ test("never rewrites poster click destinations as API asset URLs", () => {
     },
   );
 });
+
+test("never rewrites managed links or popup destinations stored under url", () => {
+  const url = "http://34.64.250.12:8080/events/welcome";
+  assert.deepEqual(
+    normalizeApiPayload(
+      { url, thumbnailUrl: `${url}.png` },
+      API_BASE_URL,
+    ),
+    {
+      url,
+      thumbnailUrl: `${API_BASE_URL}/events/welcome.png`,
+    },
+  );
+});

@@ -26,9 +26,11 @@ export function normalizeApiPayload(
   fieldName?: string,
 ): unknown {
   // Click destinations are user data, not API-hosted assets. Rewriting them
-  // would silently change where a poster sends the user.
+  // would silently change where a poster, popup, or managed link sends the user.
   if (typeof value === "string") {
-    return fieldName === "linkUrl" ? value : normalizeApiResourceUrl(value, apiBaseUrl);
+    return fieldName === "linkUrl" || fieldName === "url"
+      ? value
+      : normalizeApiResourceUrl(value, apiBaseUrl);
   }
   if (Array.isArray(value)) {
     return value.map((entry) => normalizeApiPayload(entry, apiBaseUrl, fieldName));

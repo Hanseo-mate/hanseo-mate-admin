@@ -11,6 +11,7 @@ import {
   FlagBanner,
   ImageSquare,
   List,
+  LinkSimple,
   MapTrifold,
   Megaphone,
   Plus,
@@ -79,6 +80,11 @@ const navigation: NavigationGroup[] = [
         href: "/system-notices/manage",
         label: "시스템 공지",
         icon: Broadcast,
+      },
+      {
+        href: "/settings/links",
+        label: "각종 링크",
+        icon: LinkSimple,
       },
       { href: "/calendars/manage", label: "학생회 일정", icon: CalendarDots },
       { href: "/posters/manage", label: "홈 포스터", icon: ImageSquare },
@@ -184,6 +190,11 @@ const pageTitles: Record<string, PageInfo> = {
   "/system-notices/manage": {
     title: "시스템 공지",
     description: "앱 이용 중 안내할 점검·업데이트 소식을 등록하고 관리합니다.",
+    section: "콘텐츠 운영",
+  },
+  "/settings/links": {
+    title: "각종 링크",
+    description: "학교생활에 필요한 외부 링크를 등록하고 관리합니다.",
     section: "콘텐츠 운영",
   },
   "/calendars/manage": {

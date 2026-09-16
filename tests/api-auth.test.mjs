@@ -7,6 +7,8 @@ test("recognizes every administrator API path", () => {
   assert.equal(isAdminApiPath("/api/admin/notices/7"), true);
   assert.equal(isAdminApiPath("/api/admin/system-notices"), true);
   assert.equal(isAdminApiPath("/api/admin/system-notices/7"), true);
+  assert.equal(isAdminApiPath("/api/admin/links"), true);
+  assert.equal(isAdminApiPath("/api/admin/links/7"), true);
   assert.equal(isAdminApiPath("/api/admin/bus-schedules"), true);
   assert.equal(isAdminApiPath("/api/admin/campus-map/places"), true);
   assert.equal(isAdminApiPath("/api/admin/campus-map/place-images"), true);
@@ -27,6 +29,8 @@ test("recognizes every administrator API path", () => {
     true,
   );
   assert.equal(isAdminApiPath("/api/clubs/7"), false);
+  assert.equal(isAdminApiPath("/api/links"), false);
+  assert.equal(isAdminApiPath("/api/links/7"), false);
   assert.equal(isAdminApiPath("/api/v1/timetables/major/preview"), false);
   assert.equal(
     isAdminApiPath("/api/v1/timetables/general-education/preview"),
@@ -60,6 +64,21 @@ test("adds the saved bearer token to system notice JSON requests", () => {
     assert.equal(headers.get("Accept"), "application/json");
     assert.equal(headers.get("Content-Type"), "application/json");
   }
+});
+
+test("adds the saved bearer token only to administrator link mutations", () => {
+  for (const path of ["/api/admin/links", "/api/admin/links/7"]) {
+    const headers = createApiHeaders(
+      path,
+      { "Content-Type": "application/json" },
+      "link-test-token",
+    );
+    assert.equal(headers.get("Authorization"), "Bearer link-test-token");
+    assert.equal(headers.get("Content-Type"), "application/json");
+  }
+
+  const publicHeaders = createApiHeaders("/api/links", undefined, "link-test-token");
+  assert.equal(publicHeaders.has("Authorization"), false);
 });
 
 test("adds auth to bus schedule uploads without overriding the form boundary", () => {
