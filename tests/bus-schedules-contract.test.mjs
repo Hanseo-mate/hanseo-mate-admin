@@ -167,7 +167,7 @@ test("uses the exact five-field bus schedule response and validates server data"
   }
 });
 
-test("keeps the documented three bus groups and ten valid route combinations", () => {
+test("shows only the three city-bus routes while accepting existing API categories", () => {
   assert.deepEqual(
     BUS_SCHEDULE_GROUPS.map((group) => [
       group.mainCategory,
@@ -175,21 +175,15 @@ test("keeps the documented three bus groups and ten valid route combinations", (
     ]),
     [
       ["CITY_BUS", ["TAEAN_TO_AIRFIELD", "AIRFIELD_TO_TAEAN", "HANSEO_TO_SEOSAN"]],
-      ["COMMUTER_BUS", ["COMMUTE_TO_SCHOOL", "COMMUTE_FROM_SCHOOL"]],
-      ["SCHOOL_BUS", [
-        "NEARBY_TO_SCHOOL",
-        "NEARBY_FROM_SCHOOL",
-        "CAMPUS_SHUTTLE",
-        "SEOSAN_CIRCULAR",
-        "NAEPO_SAPGYO_CIRCULAR",
-      ]],
     ],
   );
-  assert.equal(BUS_SCHEDULE_SLOTS.length, 10);
-  assert.equal(new Set(BUS_SCHEDULE_SLOTS.map((slot) => slot.subCategory)).size, 10);
+  assert.equal(BUS_SCHEDULE_SLOTS.length, 3);
+  assert.equal(new Set(BUS_SCHEDULE_SLOTS.map((slot) => slot.subCategory)).size, 3);
   for (const slot of BUS_SCHEDULE_SLOTS) {
     assert.equal(isValidBusSchedulePair(slot.mainCategory, slot.subCategory), true);
   }
+  assert.equal(isValidBusSchedulePair("COMMUTER_BUS", "COMMUTE_TO_SCHOOL"), true);
+  assert.equal(isValidBusSchedulePair("SCHOOL_BUS", "CAMPUS_SHUTTLE"), true);
   assert.equal(isValidBusSchedulePair("CITY_BUS", "CAMPUS_SHUTTLE"), false);
 });
 

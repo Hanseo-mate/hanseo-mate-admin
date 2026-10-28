@@ -66,8 +66,11 @@ test("adds the saved bearer token to system notice JSON requests", () => {
   }
 });
 
-test("adds the saved bearer token only to administrator link mutations", () => {
-  for (const path of ["/api/admin/links", "/api/admin/links/7"]) {
+test("adds the saved bearer token to administrator link reads and mutations", () => {
+  for (const path of [
+    "/api/admin/links",
+    "/api/admin/links/7",
+  ]) {
     const headers = createApiHeaders(
       path,
       { "Content-Type": "application/json" },
@@ -77,8 +80,20 @@ test("adds the saved bearer token only to administrator link mutations", () => {
     assert.equal(headers.get("Content-Type"), "application/json");
   }
 
-  const publicHeaders = createApiHeaders("/api/links", undefined, "link-test-token");
-  assert.equal(publicHeaders.has("Authorization"), false);
+  for (const path of ["/api/admin/links", "/api/admin/links/7"]) {
+    const headers = createApiHeaders(path, undefined, "link-test-token");
+    assert.equal(headers.get("Authorization"), "Bearer link-test-token");
+  }
+});
+
+test("adds the saved bearer token to home message reads and updates", () => {
+  const headers = createApiHeaders(
+    "/api/admin/home-message",
+    { "Content-Type": "application/json" },
+    "home-message-test-token",
+  );
+  assert.equal(headers.get("Authorization"), "Bearer home-message-test-token");
+  assert.equal(headers.get("Content-Type"), "application/json");
 });
 
 test("adds auth to bus schedule uploads without overriding the form boundary", () => {

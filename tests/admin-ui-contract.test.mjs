@@ -134,6 +134,7 @@ test("organizes the shell around the real administrator information architecture
     ["/notices/manage", "학생회 공지"],
     ["/system-notices/manage", "시스템 공지"],
     ["/settings/links", "각종 링크"],
+    ["/settings/home-message", "메인페이지 메시지"],
     ["/calendars/manage", "학생회 일정"],
     ["/posters/manage", "홈 포스터"],
     ["/popups/manage", "팝업 관리"],

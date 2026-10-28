@@ -1,11 +1,9 @@
-export const LINKS_ENDPOINT = "/api/links";
 export const ADMIN_LINKS_ENDPOINT = "/api/admin/links";
 
 export type ManagedLink = {
   id: number;
   name: string;
   url: string;
-  category: string;
   createdAt: string;
   updatedAt: string;
 };
@@ -13,7 +11,6 @@ export type ManagedLink = {
 export type LinkForm = {
   name: string;
   url: string;
-  category: string;
 };
 
 export type LinkFieldErrors = Partial<Record<keyof LinkForm, string>>;
@@ -42,7 +39,7 @@ export function parseManagedLink(value: unknown): ManagedLink {
     throw new Error("링크 응답 형식이 올바르지 않습니다.");
   }
 
-  const { id, name, url, category, createdAt, updatedAt } = value;
+  const { id, name, url, createdAt, updatedAt } = value;
 
   if (
     typeof id !== "number" ||
@@ -50,7 +47,6 @@ export function parseManagedLink(value: unknown): ManagedLink {
     id < 1 ||
     typeof name !== "string" ||
     typeof url !== "string" ||
-    typeof category !== "string" ||
     typeof createdAt !== "string" ||
     typeof updatedAt !== "string" ||
     !isValidLocalDateTime(createdAt) ||
@@ -59,7 +55,7 @@ export function parseManagedLink(value: unknown): ManagedLink {
     throw new Error("링크 응답 형식이 올바르지 않습니다.");
   }
 
-  return { id, name, url, category, createdAt, updatedAt };
+  return { id, name, url, createdAt, updatedAt };
 }
 
 export function parseManagedLinks(value: unknown): ManagedLink[] {
@@ -69,14 +65,7 @@ export function parseManagedLinks(value: unknown): ManagedLink[] {
 
   return value
     .map(parseManagedLink)
-    .sort((left, right) => {
-      const updatedOrder = right.updatedAt.localeCompare(left.updatedAt);
-      return updatedOrder || right.id - left.id;
-    });
-}
-
-export function normalizeLinkCategory(value: string) {
-  return value.trim().toUpperCase();
+    .sort((left, right) => left.id - right.id);
 }
 
 export function isValidExternalLinkUrl(value: string) {
@@ -94,41 +83,33 @@ export function isValidExternalLinkUrl(value: string) {
 export function validateLinkForm(form: LinkForm): ValidationResult {
   const name = form.name.trim();
   const url = form.url.trim();
-  const category = normalizeLinkCategory(form.category);
   const errors: LinkFieldErrors = {};
 
   if (!name) {
     errors.name = "링크 이름을 입력해 주세요.";
-  } else if (name.length > 100) {
+  } else if (form.name.length > 100) {
     errors.name = "링크 이름은 100자 이하로 입력해 주세요.";
   }
 
   if (!url) {
     errors.url = "이동할 주소를 입력해 주세요.";
-  } else if (url.length > 2048) {
+  } else if (form.url.length > 2048) {
     errors.url = "주소는 2,048자 이하로 입력해 주세요.";
   } else if (!isValidExternalLinkUrl(url)) {
     errors.url = "http:// 또는 https://로 시작하는 올바른 주소를 입력해 주세요.";
-  }
-
-  if (!category) {
-    errors.category = "카테고리를 입력해 주세요.";
-  } else if (category.length > 50) {
-    errors.category = "카테고리는 50자 이하로 입력해 주세요.";
   }
 
   if (Object.keys(errors).length > 0) {
     return { ok: false, errors };
   }
 
-  return { ok: true, payload: { name, url, category } };
+  return { ok: true, payload: { name, url } };
 }
 
 export function formFromManagedLink(link: ManagedLink): LinkForm {
   return {
     name: link.name,
     url: link.url,
-    category: link.category,
   };
 }
 

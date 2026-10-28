@@ -169,6 +169,16 @@ export function parseClubSummaries(payload: unknown): ClubSummary[] {
   });
 }
 
+export function moveClub<T>(clubs: readonly T[], fromIndex: number, toIndex: number): T[] {
+  if (fromIndex < 0 || fromIndex >= clubs.length || toIndex < 0 || toIndex >= clubs.length) {
+    return [...clubs];
+  }
+  const reordered = [...clubs];
+  const [club] = reordered.splice(fromIndex, 1);
+  reordered.splice(toIndex, 0, club);
+  return reordered;
+}
+
 export function parseClubDetail(payload: unknown): ClubDetail {
   if (!isRecord(payload)) {
     invalidClubData();

@@ -9,6 +9,7 @@ import {
 
 const pageUrl = new URL("../app/calendars/manage/page.tsx", import.meta.url);
 const endpoint = "/api/admin/calendars";
+const unifiedEndpoint = "/api/admin/calendars/all";
 const requestFields = ["startDate", "endDate", "title"];
 const responseFields = ["id", ...requestFields];
 const removedFields = ["content", "createdAt", "updatedAt"];
@@ -437,10 +438,25 @@ test("protects the student council calendar screen and implements the complete C
 
   assert.match(source, /<AdminLoginNotice\b/);
   assert.match(source, /returnTo=["']\/calendars\/manage["']/);
-  assert.ok(requests.some((request) => request.path === endpoint && request.method === "GET"));
+  assert.ok(requests.some((request) => request.path === unifiedEndpoint && request.method === "GET"));
   assert.ok(requests.some((request) => request.path === endpoint && request.method === "POST"));
   assert.ok(requests.some((request) => request.path === `${endpoint}/\${value}` && request.method === "PUT"));
   assert.ok(requests.some((request) => request.path === `${endpoint}/\${value}` && request.method === "DELETE"));
+});
+
+test("uses the unified read-only endpoint for school and student council calendar display", async () => {
+  const source = await readCalendarPage();
+  const sourceFile = parsePage(source);
+  const requests = collectCalendarRequests(sourceFile);
+  const unifiedRequests = requests.filter((request) => request.path === unifiedEndpoint);
+
+  assert.deepEqual(unifiedRequests.map((request) => request.method), ["GET"]);
+  assert.match(source, /type CalendarType\s*=\s*["']SCHOOL["']\s*\|\s*["']STUDENT_COUNCIL["']/);
+  assert.match(source, /calendarType\s*!==\s*["']SCHOOL["']/);
+  assert.match(source, /calendarType\s*!==\s*["']STUDENT_COUNCIL["']/);
+  assert.match(source, /`\$\{item\.calendarType\}-\$\{item\.id\}`/);
+  assert.match(source, /calendarType\s*===\s*["']STUDENT_COUNCIL["']/);
+  assert.match(source, /조회 전용/);
 });
 
 test("uses the exact calendar response and full JSON request shapes from the specification", async () => {
@@ -544,7 +560,7 @@ test("keeps title and date validation faithful to the documented rules", async (
   assert.ok(ts.isIdentifier(titleValue) && titleValue.text === "title");
 });
 
-test("sorts the complete list by start date, end date, then calendar number", async () => {
+test("sorts the unified list by dates, calendar type, then calendar number", async () => {
   const sourceFile = parsePage(await readCalendarPage());
   const sortFunction = findFunction(sourceFile, "sortCalendars");
   const comparator = findSortComparator(sortFunction);
@@ -554,10 +570,11 @@ test("sorts the complete list by start date, end date, then calendar number", as
   const secondParameter = comparator.parameters[1].name.getText(sourceFile);
   const terms = flattenLogicalOr(comparatorExpression(comparator));
 
-  assert.equal(terms.length, 3);
+  assert.equal(terms.length, 4);
   assert.equal(isLocaleCompareTerm(terms[0], firstParameter, secondParameter, "startDate"), true);
   assert.equal(isLocaleCompareTerm(terms[1], firstParameter, secondParameter, "endDate"), true);
-  assert.equal(isNumericFieldDifference(terms[2], firstParameter, secondParameter, "id"), true);
+  assert.equal(isLocaleCompareTerm(terms[2], firstParameter, secondParameter, "calendarType"), true);
+  assert.equal(isNumericFieldDifference(terms[3], firstParameter, secondParameter, "id"), true);
 });
 
 test("keeps developer terminology out of the calendar screen and attaches administrator auth", async () => {
@@ -567,7 +584,7 @@ test("keeps developer terminology out of the calendar screen and attaches admini
   assert.doesNotMatch(copy, /일정\s*(?:ID|아이디)/i);
   assert.doesNotMatch(copy, /페이지네이션/);
 
-  for (const path of [endpoint, `${endpoint}/7`]) {
+  for (const path of [endpoint, unifiedEndpoint, `${endpoint}/7`]) {
     assert.equal(isAdminApiPath(path), true);
     const headers = createApiHeaders(
       path,

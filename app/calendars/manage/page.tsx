@@ -36,12 +36,14 @@ type CalendarItem = {
   title: string;
 };
 
+type CalendarType = "SCHOOL" | "STUDENT_COUNCIL";
+type UnifiedCalendarItem = CalendarItem & { calendarType: CalendarType };
 type CalendarForm = Pick<CalendarItem, "startDate" | "endDate" | "title">;
 type LoadState = "idle" | "loading" | "ready" | "error";
 type Feedback = { tone: "success" | "info" | "error"; title: string; message: string };
 type EditorMode = "create" | "edit";
 type PendingAction =
-  | { kind: "select"; item: CalendarItem }
+  | { kind: "select"; item: UnifiedCalendarItem }
   | { kind: "refresh" }
   | { kind: "close-create" }
   | { kind: "close-edit" }
@@ -55,6 +57,7 @@ type MonthDay = {
 };
 
 const CALENDAR_ENDPOINT = "/api/admin/calendars";
+const UNIFIED_CALENDAR_ENDPOINT = "/api/admin/calendars/all";
 const emptyForm: CalendarForm = { startDate: "", endDate: "", title: "" };
 const weekdayLabels = ["일", "월", "화", "수", "목", "금", "토"];
 const dateFormatter = new Intl.DateTimeFormat("ko-KR", {
@@ -115,10 +118,32 @@ function parseCalendar(value: unknown): CalendarItem {
   return item as CalendarItem;
 }
 
-function sortCalendars(items: CalendarItem[]) {
+function parseUnifiedCalendar(value: unknown): UnifiedCalendarItem {
+  const item = parseCalendar(value);
+  const calendarType = (value as Partial<UnifiedCalendarItem>).calendarType;
+  if (calendarType !== "SCHOOL" && calendarType !== "STUDENT_COUNCIL") {
+    throw userFacingError("일정 출처를 확인할 수 없습니다. 잠시 후 다시 불러와 주세요.");
+  }
+  return { ...item, calendarType };
+}
+
+function toStudentCouncilCalendar(item: CalendarItem): UnifiedCalendarItem {
+  return { ...item, calendarType: "STUDENT_COUNCIL" };
+}
+
+function calendarKey(item: UnifiedCalendarItem) {
+  return `${item.calendarType}-${item.id}`;
+}
+
+function calendarSourceLabel(item: UnifiedCalendarItem) {
+  return item.calendarType === "SCHOOL" ? "학교" : "학생회";
+}
+
+function sortCalendars(items: UnifiedCalendarItem[]) {
   return [...items].sort((first, second) => (
     first.startDate.localeCompare(second.startDate) ||
     first.endDate.localeCompare(second.endDate) ||
+    first.calendarType.localeCompare(second.calendarType) ||
     first.id - second.id
   ));
 }
@@ -127,7 +152,7 @@ function parseCalendars(value: unknown) {
   if (!Array.isArray(value)) {
     throw userFacingError("일정 목록을 확인할 수 없습니다. 잠시 후 다시 불러와 주세요.");
   }
-  return sortCalendars(value.map(parseCalendar));
+  return sortCalendars(value.map(parseUnifiedCalendar));
 }
 
 function formFromItem(item: CalendarItem): CalendarForm {
@@ -218,7 +243,7 @@ function buildMonthDays(view: MonthView): MonthDay[] {
   });
 }
 
-function eventsOnDay(items: CalendarItem[], dateKey: string) {
+function eventsOnDay(items: UnifiedCalendarItem[], dateKey: string) {
   return items.filter((item) => item.startDate <= dateKey && item.endDate >= dateKey);
 }
 
@@ -543,11 +568,11 @@ function ListLoadingState() {
 }
 
 export default function ManageCalendarPage() {
-  const [calendars, setCalendars] = useState<CalendarItem[]>([]);
+  const [calendars, setCalendars] = useState<UnifiedCalendarItem[]>([]);
   const [listState, setListState] = useState<LoadState>("idle");
   const [listError, setListError] = useState("");
   const [createForm, setCreateForm] = useState<CalendarForm>({ ...emptyForm });
-  const [selected, setSelected] = useState<CalendarItem | null>(null);
+  const [selected, setSelected] = useState<UnifiedCalendarItem | null>(null);
   const [editForm, setEditForm] = useState<CalendarForm>({ ...emptyForm });
   const [editBaseline, setEditBaseline] = useState(JSON.stringify(emptyForm));
   const [busyAction, setBusyAction] = useState("");
@@ -558,7 +583,7 @@ export default function ManageCalendarPage() {
   const [editorMode, setEditorMode] = useState<EditorMode | null>(null);
   const [visibleMonth, setVisibleMonth] = useState<MonthView>(() => monthFromDate());
   const listController = useRef<AbortController | null>(null);
-  const selectedIdRef = useRef<number | null>(null);
+  const selectedKeyRef = useRef<string | null>(null);
   const mutationInProgress = useRef(false);
 
   const todayKey = useMemo(() => toDateKey(new Date()), []);
@@ -587,10 +612,15 @@ export default function ManageCalendarPage() {
     () => calendars.filter((item) => item.endDate >= todayKey).length,
     [calendars, todayKey],
   );
+  const schoolCalendarCount = useMemo(
+    () => calendars.filter((item) => item.calendarType === "SCHOOL").length,
+    [calendars],
+  );
+  const studentCouncilCalendarCount = calendars.length - schoolCalendarCount;
   const monthTitle = monthFormatter.format(new Date(Date.UTC(visibleMonth.year, visibleMonth.month, 1)));
 
   const clearSelection = useCallback(() => {
-    selectedIdRef.current = null;
+    selectedKeyRef.current = null;
     setSelected(null);
     setEditForm({ ...emptyForm });
     setEditBaseline(JSON.stringify(emptyForm));
@@ -607,7 +637,7 @@ export default function ManageCalendarPage() {
     setListError("");
 
     try {
-      const response = await apiFetch<unknown>(CALENDAR_ENDPOINT, {
+      const response = await apiFetch<unknown>(UNIFIED_CALENDAR_ENDPOINT, {
         method: "GET",
         cache: "no-store",
         signal: controller.signal,
@@ -618,9 +648,9 @@ export default function ManageCalendarPage() {
       setCalendars(nextCalendars);
       setListState("ready");
 
-      const selectedId = selectedIdRef.current;
-      if (selectedId !== null) {
-        const refreshed = nextCalendars.find((item) => item.id === selectedId) ?? null;
+      const selectedKey = selectedKeyRef.current;
+      if (selectedKey !== null) {
+        const refreshed = nextCalendars.find((item) => calendarKey(item) === selectedKey) ?? null;
         if (refreshed) {
           const nextForm = formFromItem(refreshed);
           setSelected(refreshed);
@@ -688,9 +718,10 @@ export default function ManageCalendarPage() {
     setEditorMode("create");
   }
 
-  function selectItem(item: CalendarItem) {
+  function selectItem(item: UnifiedCalendarItem) {
+    if (item.calendarType !== "STUDENT_COUNCIL") return;
     const nextForm = formFromItem(item);
-    selectedIdRef.current = item.id;
+    selectedKeyRef.current = calendarKey(item);
     setSelected(item);
     setEditForm(nextForm);
     setEditBaseline(JSON.stringify(nextForm));
@@ -699,8 +730,9 @@ export default function ManageCalendarPage() {
     setEditorMode("edit");
   }
 
-  function requestSelection(item: CalendarItem) {
-    if (selected?.id === item.id && !isEditDirty) {
+  function requestSelection(item: UnifiedCalendarItem) {
+    if (item.calendarType !== "STUDENT_COUNCIL") return;
+    if (selected && calendarKey(selected) === calendarKey(item) && !isEditDirty) {
       setEditorMode("edit");
       return;
     }
@@ -775,12 +807,15 @@ export default function ManageCalendarPage() {
     mutationInProgress.current = true;
     setBusyAction("create");
     try {
-      const created = parseCalendar(await apiFetch<unknown>(CALENDAR_ENDPOINT, {
+      const created = toStudentCouncilCalendar(parseCalendar(await apiFetch<unknown>(CALENDAR_ENDPOINT, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
-      }));
-      setCalendars((current) => sortCalendars([...current.filter((item) => item.id !== created.id), created]));
+      })));
+      setCalendars((current) => sortCalendars([
+        ...current.filter((item) => calendarKey(item) !== calendarKey(created)),
+        created,
+      ]));
       setListState("ready");
       setCreateForm({ ...emptyForm });
       setVisibleMonth(monthFromDateKey(created.startDate));
@@ -811,13 +846,15 @@ export default function ManageCalendarPage() {
     mutationInProgress.current = true;
     setBusyAction("save");
     try {
-      const updated = parseCalendar(await apiFetch<unknown>(`${CALENDAR_ENDPOINT}/${selected.id}`, {
+      const updated = toStudentCouncilCalendar(parseCalendar(await apiFetch<unknown>(`${CALENDAR_ENDPOINT}/${selected.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
-      }));
+      })));
       const savedForm = formFromItem(updated);
-      setCalendars((current) => sortCalendars(current.map((item) => item.id === updated.id ? updated : item)));
+      setCalendars((current) => sortCalendars(current.map((item) => (
+        calendarKey(item) === calendarKey(updated) ? updated : item
+      ))));
       setSelected(updated);
       setEditForm(savedForm);
       setEditBaseline(JSON.stringify(savedForm));
@@ -847,7 +884,7 @@ export default function ManageCalendarPage() {
     setFeedback(null);
     try {
       await apiFetch<void>(`${CALENDAR_ENDPOINT}/${target.id}`, { method: "DELETE" });
-      setCalendars((current) => current.filter((item) => item.id !== target.id));
+      setCalendars((current) => current.filter((item) => calendarKey(item) !== calendarKey(target)));
       clearSelection();
       setFeedback({ tone: "success", title: "일정을 삭제했습니다.", message: "선택한 일정이 목록에서 삭제되었습니다." });
     } catch (error) {
@@ -873,7 +910,7 @@ export default function ManageCalendarPage() {
     setFeedback(null);
   }
 
-  function renderListGroup(title: string, items: CalendarItem[], tone: "upcoming" | "past") {
+  function renderListGroup(title: string, items: UnifiedCalendarItem[], tone: "upcoming" | "past") {
     if (items.length === 0) return null;
     return (
       <section className={styles.listGroup} aria-labelledby={`calendar-${tone}-title`}>
@@ -884,27 +921,49 @@ export default function ManageCalendarPage() {
         <div className={styles.eventList}>
           {items.map((item) => {
             const timing = eventTiming(item, todayKey);
-            return (
-              <button
-                className={`${styles.listItem} ${selected?.id === item.id ? styles.selectedListItem : ""}`}
-                type="button"
-                key={item.id}
-                aria-label={`${item.title}, ${formatDateRange(item.startDate, item.endDate)}, 수정`}
-                onClick={() => requestSelection(item)}
-                disabled={isBusy}
-              >
+            const editable = item.calendarType === "STUDENT_COUNCIL";
+            const content = (
+              <>
                 <span className={styles.listDate} aria-hidden="true">
                   <CalendarBlank size={17} />
                 </span>
                 <span className={styles.listItemCopy}>
                   <strong>{item.title}</strong>
-                  <small>{formatDateRange(item.startDate, item.endDate)}</small>
+                  <small>
+                    <span className={`${styles.sourceBadge} ${editable ? styles.studentCouncilBadge : styles.schoolBadge}`}>
+                      {calendarSourceLabel(item)}
+                    </span>
+                    {formatDateRange(item.startDate, item.endDate)}
+                  </small>
                 </span>
                 <span className={`${styles.timingBadge} ${styles[`${timing}Badge`]}`}>
                   {timing === "past" ? "지난 일정" : timing === "ongoing" ? "진행 중" : "예정"}
                 </span>
-                <PencilSimple className={styles.listEditIcon} size={16} aria-hidden="true" />
+                {editable
+                  ? <PencilSimple className={styles.listEditIcon} size={16} aria-hidden="true" />
+                  : <span className={styles.readOnlyLabel}>조회</span>}
+              </>
+            );
+
+            return editable ? (
+              <button
+                className={`${styles.listItem} ${selected && calendarKey(selected) === calendarKey(item) ? styles.selectedListItem : ""}`}
+                type="button"
+                key={calendarKey(item)}
+                aria-label={`${item.title}, ${formatDateRange(item.startDate, item.endDate)}, 학생회 일정 수정`}
+                onClick={() => requestSelection(item)}
+                disabled={isBusy}
+              >
+                {content}
               </button>
+            ) : (
+              <div
+                className={`${styles.listItem} ${styles.readOnlyListItem}`}
+                key={calendarKey(item)}
+                aria-label={`${item.title}, ${formatDateRange(item.startDate, item.endDate)}, 학교 공식 일정, 조회 전용`}
+              >
+                {content}
+              </div>
             );
           })}
         </div>
@@ -919,7 +978,7 @@ export default function ManageCalendarPage() {
         <header className={styles.pageHeader}>
           <div>
             <h2>학생회 일정</h2>
-            <p>학사 일정과 행사를 월별로 확인하고 수정합니다.</p>
+            <p>학교 공식 일정과 학생회 일정을 함께 확인하고, 학생회 일정만 등록·수정·삭제합니다.</p>
           </div>
           <div className={styles.pageHeaderActions}>
             <button
@@ -944,7 +1003,9 @@ export default function ManageCalendarPage() {
         </header>
 
         <dl className={styles.summaryBar} aria-label="일정 현황">
-          <div><dt>전체 일정</dt><dd>{listState === "ready" ? `${calendars.length}개` : "-"}</dd></div>
+          <div><dt>전체 공개 일정</dt><dd>{listState === "ready" ? `${calendars.length}개` : "-"}</dd></div>
+          <div><dt>학교 일정</dt><dd>{listState === "ready" ? `${schoolCalendarCount}개` : "-"}</dd></div>
+          <div><dt>학생회 일정</dt><dd>{listState === "ready" ? `${studentCouncilCalendarCount}개` : "-"}</dd></div>
           <div><dt>예정 일정</dt><dd>{listState === "ready" ? `${allUpcomingCount}개` : "-"}</dd></div>
           <div><dt>{monthTitle}</dt><dd>{listState === "ready" ? `${monthCalendars.length}개` : "-"}</dd></div>
         </dl>
@@ -975,7 +1036,7 @@ export default function ManageCalendarPage() {
                 <span className={styles.panelIcon} aria-hidden="true"><CalendarDots size={19} /></span>
                 <div>
                   <h3 id="calendar-month-title">{monthTitle}</h3>
-                  <p>날짜별 일정 분포와 기간을 한눈에 확인하세요.</p>
+                  <p>학교·학생회 공개 일정의 날짜와 기간을 한눈에 확인하세요.</p>
                 </div>
               </div>
               <div className={styles.monthControls}>
@@ -1047,17 +1108,27 @@ export default function ManageCalendarPage() {
                             <div className={styles.dayEvents}>
                               {visibleEvents.map((item) => {
                                 const timing = eventTiming(item, todayKey);
-                                return (
+                                const editable = item.calendarType === "STUDENT_COUNCIL";
+                                return editable ? (
                                   <button
-                                    className={`${styles.dayEvent} ${timing === "past" ? styles.pastDayEvent : ""} ${selected?.id === item.id ? styles.selectedDayEvent : ""}`}
+                                    className={`${styles.dayEvent} ${timing === "past" ? styles.pastDayEvent : ""} ${selected && calendarKey(selected) === calendarKey(item) ? styles.selectedDayEvent : ""}`}
                                     type="button"
-                                    key={item.id}
-                                    title={`${item.title} (${formatDateRange(item.startDate, item.endDate)})`}
-                                    aria-label={`${item.title}, ${formatDateRange(item.startDate, item.endDate)}, 수정`}
+                                    key={calendarKey(item)}
+                                    title={`학생회 · ${item.title} (${formatDateRange(item.startDate, item.endDate)})`}
+                                    aria-label={`${item.title}, ${formatDateRange(item.startDate, item.endDate)}, 학생회 일정 수정`}
                                     onClick={() => requestSelection(item)}
                                   >
-                                    {item.title}
+                                    학생회 · {item.title}
                                   </button>
+                                ) : (
+                                  <span
+                                    className={`${styles.dayEvent} ${styles.schoolDayEvent} ${timing === "past" ? styles.pastDayEvent : ""}`}
+                                    key={calendarKey(item)}
+                                    title={`학교 · ${item.title} (${formatDateRange(item.startDate, item.endDate)})`}
+                                    aria-label={`${item.title}, ${formatDateRange(item.startDate, item.endDate)}, 학교 공식 일정, 조회 전용`}
+                                  >
+                                    학교 · {item.title}
+                                  </span>
                                 );
                               })}
                               {dayEvents.length > visibleEvents.length && (
@@ -1078,7 +1149,7 @@ export default function ManageCalendarPage() {
             <header className={styles.listHeader}>
               <div>
                 <h3 id="calendar-list-title">{monthTitle} 일정</h3>
-                <p>일정을 누르면 수정 화면을 열 수 있습니다.</p>
+                <p>학생회 일정은 눌러 수정하고, 학교 일정은 조회할 수 있습니다.</p>
               </div>
               <span className={styles.countBadge} aria-live="polite">
                 {listState === "ready" ? `${monthCalendars.length}개` : "-"}
@@ -1097,8 +1168,8 @@ export default function ManageCalendarPage() {
               ) : monthCalendars.length === 0 ? (
                 <div className={styles.emptyState} role="status">
                   <span aria-hidden="true"><CalendarBlank size={24} /></span>
-                  <strong>이 달에 등록된 일정이 없습니다.</strong>
-                  <p>필요한 일정을 등록하거나 다른 달을 확인해 보세요.</p>
+                  <strong>이 달에 공개된 일정이 없습니다.</strong>
+                  <p>새 학생회 일정을 등록하거나 다른 달을 확인해 보세요.</p>
                   <button className={`${styles.button} ${styles.primaryButton}`} type="button" onClick={openCreateDialog}>
                     <Plus size={17} aria-hidden="true" />
                     일정 등록
@@ -1114,7 +1185,7 @@ export default function ManageCalendarPage() {
 
             <footer className={styles.listFooter}>
               <Clock size={16} aria-hidden="true" />
-              <span>예정과 지난 일정은 종료일을 기준으로 구분합니다.</span>
+              <span>학교 일정은 조회 전용이며, 학생회 일정만 수정·삭제할 수 있습니다.</span>
             </footer>
           </aside>
         </div>

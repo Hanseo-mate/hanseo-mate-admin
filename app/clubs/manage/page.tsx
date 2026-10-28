@@ -13,6 +13,7 @@ import {
 import { AdminLoginNotice } from "../../components/AdminLoginNotice";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { UnsavedChangesDialog } from "../../components/UnsavedChangesDialog";
+import { ClubOrderPanel } from "./ClubOrderPanel";
 import { ADMIN_SESSION_EVENT, getAdminSession } from "../../lib/auth";
 import { apiFetch, getErrorText } from "../../lib/api";
 import {
@@ -98,6 +99,7 @@ export default function ManageClubPage() {
   const [feedback, setFeedback] = useState<Feedback | null>(null);
   const [confirmTarget, setConfirmTarget] = useState<ConfirmTarget>(null);
   const [pendingClub, setPendingClub] = useState<ClubSummary | null>(null);
+  const [orderMode, setOrderMode] = useState(false);
   const listController = useRef<AbortController | null>(null);
   const detailController = useRef<AbortController | null>(null);
   const editorHeadingRef = useRef<HTMLDivElement | null>(null);
@@ -446,6 +448,12 @@ export default function ManageClubPage() {
     <AdminLoginNotice returnTo="/clubs/manage">
       <UnsavedChangesDialog dirty={hasUnsavedChanges} />
       <div className="stack-lg">
+      {orderMode ? (
+        <ClubOrderPanel onClose={() => {
+          setOrderMode(false);
+          if (hasSession) void loadClubs(categoryFilter);
+        }} />
+      ) : (
       <div className="club-management-layout">
         <aside className="panel club-list-panel" aria-labelledby="club-list-title">
           <div className="club-list-heading">
@@ -487,6 +495,15 @@ export default function ManageClubPage() {
               disabled={!hasSession || listState === "loading"}
             >
               {listState === "loading" ? "불러오는 중..." : "목록 새로고침"}
+            </button>
+            <button
+              className="button button-primary club-list-refresh"
+              type="button"
+              onClick={() => setOrderMode(true)}
+              disabled={!hasSession || listState !== "ready" || hasUnsavedChanges || isBusy}
+              title={hasUnsavedChanges ? "소개와 사진 변경을 저장한 뒤 순서를 변경할 수 있습니다." : undefined}
+            >
+              표시 순서 변경
             </button>
           </div>
 
@@ -717,6 +734,7 @@ export default function ManageClubPage() {
           )}
         </div>
       </div>
+      )}
 
       <ConfirmDialog
         open={Boolean(confirmTarget)}

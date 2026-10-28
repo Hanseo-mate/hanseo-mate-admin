@@ -44,34 +44,26 @@ export const BUS_SCHEDULE_GROUPS: readonly BusScheduleGroup[] = [
       { mainCategory: "CITY_BUS", subCategory: "HANSEO_TO_SEOSAN", label: "한서대 → 서산" },
     ],
   },
-  {
-    mainCategory: "COMMUTER_BUS",
-    label: "통근버스",
-    description: "학교 구성원이 이용하는 통근버스 시간표입니다.",
-    slots: [
-      { mainCategory: "COMMUTER_BUS", subCategory: "COMMUTE_TO_SCHOOL", label: "통근 등교" },
-      { mainCategory: "COMMUTER_BUS", subCategory: "COMMUTE_FROM_SCHOOL", label: "통근 하교" },
-    ],
-  },
-  {
-    mainCategory: "SCHOOL_BUS",
-    label: "학교 셔틀",
-    description: "학교 주변과 캠퍼스를 운행하는 셔틀 시간표입니다.",
-    slots: [
-      { mainCategory: "SCHOOL_BUS", subCategory: "NEARBY_TO_SCHOOL", label: "인근 등교" },
-      { mainCategory: "SCHOOL_BUS", subCategory: "NEARBY_FROM_SCHOOL", label: "인근 하교" },
-      { mainCategory: "SCHOOL_BUS", subCategory: "CAMPUS_SHUTTLE", label: "캠퍼스 셔틀" },
-      { mainCategory: "SCHOOL_BUS", subCategory: "SEOSAN_CIRCULAR", label: "서산 순환" },
-      { mainCategory: "SCHOOL_BUS", subCategory: "NAEPO_SAPGYO_CIRCULAR", label: "내포·삽교 순환" },
-    ],
-  },
 ];
 
 export const BUS_SCHEDULE_SLOTS = BUS_SCHEDULE_GROUPS.flatMap((group) => group.slots);
 
-const mainCategories = new Set<MainCategory>(BUS_SCHEDULE_GROUPS.map((group) => group.mainCategory));
+// API가 기존 통근·셔틀 데이터를 함께 반환해도 목록 전체가 실패하지 않게 한다.
+// 관리 화면에서 노출·업로드하는 구간은 BUS_SCHEDULE_GROUPS의 시내버스 3개만 사용한다.
+const supportedSchedulePairs: readonly Pick<BusScheduleSlot, "mainCategory" | "subCategory">[] = [
+  ...BUS_SCHEDULE_SLOTS,
+  { mainCategory: "COMMUTER_BUS", subCategory: "COMMUTE_TO_SCHOOL" },
+  { mainCategory: "COMMUTER_BUS", subCategory: "COMMUTE_FROM_SCHOOL" },
+  { mainCategory: "SCHOOL_BUS", subCategory: "NEARBY_TO_SCHOOL" },
+  { mainCategory: "SCHOOL_BUS", subCategory: "NEARBY_FROM_SCHOOL" },
+  { mainCategory: "SCHOOL_BUS", subCategory: "CAMPUS_SHUTTLE" },
+  { mainCategory: "SCHOOL_BUS", subCategory: "SEOSAN_CIRCULAR" },
+  { mainCategory: "SCHOOL_BUS", subCategory: "NAEPO_SAPGYO_CIRCULAR" },
+];
+
+const mainCategories = new Set<MainCategory>(["CITY_BUS", "COMMUTER_BUS", "SCHOOL_BUS"]);
 const subCategoryToMain = new Map<SubCategory, MainCategory>(
-  BUS_SCHEDULE_SLOTS.map((slot) => [slot.subCategory, slot.mainCategory]),
+  supportedSchedulePairs.map((slot) => [slot.subCategory, slot.mainCategory]),
 );
 const localDateTimePattern = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,9})?$/;
 const allowedImageTypes = new Set(["image/jpeg", "image/png", "image/gif"]);

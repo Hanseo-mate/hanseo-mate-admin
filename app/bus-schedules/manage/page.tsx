@@ -127,7 +127,7 @@ function LoadingCards() {
   return (
     <div className={styles.loadingGrid} role="status" aria-live="polite">
       <span className={styles.visuallyHidden}>버스 시간표를 불러오고 있습니다.</span>
-      {Array.from({ length: 6 }, (_, index) => (
+      {Array.from({ length: BUS_SCHEDULE_SLOTS.length }, (_, index) => (
         <div className={styles.loadingCard} aria-hidden="true" key={index}>
           <span className={styles.loadingHeading} />
           <span className={styles.loadingImage} />
@@ -161,7 +161,9 @@ export default function ManageBusSchedulesPage() {
     }
     return result;
   }, [schedules]);
-  const registeredCount = scheduleByKey.size;
+  const registeredCount = BUS_SCHEDULE_SLOTS.filter((slot) => (
+    scheduleByKey.has(busScheduleKey(slot.mainCategory, slot.subCategory))
+  )).length;
 
   const loadSchedules = useCallback(async () => {
     listController.current?.abort();
@@ -350,7 +352,7 @@ export default function ManageBusSchedulesPage() {
         <header className={styles.pageHeader}>
           <div>
             <h2>버스 시간표 관리</h2>
-            <p>버스 종류와 운행 구간별 시간표 사진을 확인하고 새 사진으로 바꿀 수 있습니다.</p>
+            <p>시내버스 3개 운행 구간의 시간표 사진을 확인하고 새 사진으로 바꿀 수 있습니다.</p>
           </div>
           <button
             className={`${styles.button} ${styles.secondaryButton}`}
@@ -366,7 +368,7 @@ export default function ManageBusSchedulesPage() {
         <section className={styles.overview} aria-label="버스 시간표 등록 현황">
           <span className={styles.overviewIcon} aria-hidden="true"><Bus size={24} /></span>
           <div>
-            <strong>전체 운행 구간을 한곳에서 관리합니다.</strong>
+            <strong>시내버스 3개 운행 구간을 한곳에서 관리합니다.</strong>
             <p>같은 구간에 새 사진을 적용하면 기존 시간표가 자동으로 교체됩니다.</p>
           </div>
           <span className={styles.overviewCount}>

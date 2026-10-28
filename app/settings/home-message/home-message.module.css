@@ -1,0 +1,373 @@
+.page {
+  display: grid;
+  gap: 18px;
+  max-width: 1120px;
+  margin: 0 auto;
+  color: var(--ink-900);
+}
+
+.hero,
+.panel,
+.previewPanel,
+.statePanel {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-panel, 18px);
+  background: var(--white);
+  box-shadow: var(--shadow-sm);
+}
+
+.hero {
+  display: flex;
+  align-items: center;
+  gap: 17px;
+  padding: 24px 26px;
+}
+
+.heroIcon,
+.previewIcon {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  color: var(--brand-primary);
+  background: var(--brand-light);
+}
+
+.heroIcon {
+  width: 56px;
+  height: 56px;
+  border-radius: 15px;
+}
+
+.eyebrow {
+  color: var(--brand-primary);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.hero h2 {
+  margin: 4px 0 0;
+  font-size: clamp(22px, 3vw, 28px);
+  letter-spacing: -0.04em;
+}
+
+.hero p,
+.panelHeader p,
+.previewHeader p,
+.statePanel p {
+  margin: 5px 0 0;
+  color: var(--ink-500);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.scopeBadge {
+  margin-left: auto;
+  padding: 7px 11px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--ink-500);
+  background: var(--surface);
+  font-size: 11px;
+  font-weight: 750;
+  white-space: nowrap;
+}
+
+.workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(260px, 0.8fr);
+  align-items: start;
+  gap: 18px;
+}
+
+.panel,
+.previewPanel {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.panelHeader,
+.previewHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 21px 24px;
+  border-bottom: 1px solid var(--line);
+}
+
+.panelHeader h3,
+.previewHeader h3 {
+  margin: 0;
+  font-size: 17px;
+  letter-spacing: -0.025em;
+}
+
+.unsavedBadge {
+  flex: 0 0 auto;
+  padding: 5px 9px;
+  border-radius: 999px;
+  color: var(--brand-primary);
+  background: var(--brand-light);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.form {
+  padding: 23px 24px 24px;
+}
+
+.form label {
+  display: block;
+  margin-bottom: 10px;
+  font-size: 13px;
+  font-weight: 760;
+}
+
+.form textarea {
+  display: block;
+  width: 100%;
+  min-height: 180px;
+  padding: 14px 15px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  outline: none;
+  resize: vertical;
+  color: var(--ink-900);
+  background: var(--white);
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.65;
+  transition: border-color 150ms ease, box-shadow 150ms ease;
+}
+
+.form textarea:focus {
+  border-color: var(--brand-primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand-primary) 14%, transparent);
+}
+
+.form textarea[aria-invalid="true"] {
+  border-color: var(--danger);
+}
+
+.fieldMeta {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 10px;
+  color: var(--ink-500);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.fieldMeta p {
+  margin: 0;
+}
+
+.fieldMeta span {
+  flex: 0 0 auto;
+  font-weight: 760;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 27px;
+  padding-top: 19px;
+  border-top: 1px solid var(--line);
+}
+
+.actionSpacer {
+  flex: 1;
+}
+
+.primaryButton,
+.secondaryButton,
+.dangerButton {
+  display: inline-flex;
+  min-height: 40px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 0 14px;
+  border: 1px solid;
+  border-radius: 10px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.primaryButton {
+  border-color: var(--brand-primary);
+  color: white;
+  background: var(--brand-primary);
+}
+
+.secondaryButton {
+  border-color: var(--line);
+  color: var(--ink-900);
+  background: var(--white);
+}
+
+.dangerButton {
+  border-color: color-mix(in srgb, var(--danger) 25%, transparent);
+  color: var(--danger);
+  background: var(--danger-bg);
+}
+
+.primaryButton:disabled,
+.secondaryButton:disabled,
+.dangerButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.52;
+}
+
+.previewHeader {
+  justify-content: flex-start;
+}
+
+.previewIcon {
+  width: 39px;
+  height: 39px;
+  border-radius: 10px;
+}
+
+.previewText,
+.emptyPreview {
+  min-height: 146px;
+  margin: 0;
+  padding: 27px 25px;
+  font-size: 15px;
+  line-height: 1.8;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.emptyPreview {
+  color: var(--ink-400);
+}
+
+.previewNote {
+  margin: 0;
+  padding: 15px 24px;
+  border-top: 1px solid var(--line);
+  color: var(--ink-500);
+  background: var(--surface);
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.feedback {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 13px 14px;
+  border: 1px solid;
+  border-radius: 11px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.feedback span {
+  flex: 1;
+}
+
+.feedback button {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 0;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+}
+
+.success {
+  border-color: color-mix(in srgb, var(--success) 25%, transparent);
+  color: var(--success);
+  background: var(--success-bg);
+}
+
+.error {
+  border-color: color-mix(in srgb, var(--danger) 25%, transparent);
+  color: var(--danger);
+  background: var(--danger-bg);
+}
+
+.statePanel {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  min-height: 150px;
+  padding: 25px;
+  color: var(--brand-primary);
+}
+
+.statePanel div {
+  flex: 1;
+}
+
+.statePanel strong {
+  color: var(--ink-900);
+  font-size: 14px;
+}
+
+.spinner {
+  animation: spin 800ms linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (max-width: 800px) {
+  .workspace {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 560px) {
+  .hero {
+    flex-wrap: wrap;
+    padding: 19px;
+  }
+
+  .scopeBadge {
+    margin-left: 0;
+  }
+
+  .panelHeader,
+  .previewHeader,
+  .form {
+    padding-right: 18px;
+    padding-left: 18px;
+  }
+
+  .fieldMeta {
+    flex-direction: column;
+  }
+
+  .actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .actions .dangerButton,
+  .actions .primaryButton {
+    grid-column: 1 / -1;
+  }
+
+  .actionSpacer {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation: none;
+  }
+}

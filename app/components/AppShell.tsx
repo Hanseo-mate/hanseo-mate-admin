@@ -7,6 +7,7 @@ import {
   Bus,
   CalendarDots,
   CaretRight,
+  ChatText,
   DeviceMobile,
   FlagBanner,
   ImageSquare,
@@ -85,6 +86,11 @@ const navigation: NavigationGroup[] = [
         href: "/settings/links",
         label: "각종 링크",
         icon: LinkSimple,
+      },
+      {
+        href: "/settings/home-message",
+        label: "메인페이지 메시지",
+        icon: ChatText,
       },
       { href: "/calendars/manage", label: "학생회 일정", icon: CalendarDots },
       { href: "/posters/manage", label: "홈 포스터", icon: ImageSquare },
@@ -197,6 +203,11 @@ const pageTitles: Record<string, PageInfo> = {
     description: "학교생활에 필요한 외부 링크를 등록하고 관리합니다.",
     section: "콘텐츠 운영",
   },
+  "/settings/home-message": {
+    title: "메인페이지 메시지",
+    description: "앱 홈에 표시할 공통 메시지를 설정합니다.",
+    section: "콘텐츠 운영",
+  },
   "/calendars/manage": {
     title: "학생회 일정",
     description: "학생회 일정을 날짜별로 확인하고 등록, 수정, 삭제합니다.",
@@ -204,7 +215,7 @@ const pageTitles: Record<string, PageInfo> = {
   },
   "/bus-schedules/manage": {
     title: "버스 시간표",
-    description: "시내버스·통근버스·학교 셔틀 시간표 사진을 등록하고 교체합니다.",
+    description: "시내버스 3개 운행 구간의 시간표 사진을 등록하고 교체합니다.",
     section: "교통 정보",
   },
   "/campus-map/manage": {

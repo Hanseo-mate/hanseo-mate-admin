@@ -210,9 +210,7 @@
 
 .countBadge,
 .unsavedBadge,
-.categoryBadge,
-.modeLabel,
-.categoryPreview {
+.modeLabel {
   display: inline-flex;
   align-items: center;
   width: fit-content;
@@ -233,7 +231,7 @@
 
 .listControls {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 138px;
+  grid-template-columns: minmax(0, 1fr);
   gap: 8px;
   padding: 12px;
   border-bottom: 1px solid var(--line);
@@ -254,7 +252,6 @@
 }
 
 .searchField input,
-.filterField select,
 .field input {
   width: 100%;
   border: 1px solid var(--line);
@@ -266,8 +263,7 @@
   transition: border-color 150ms ease, box-shadow 150ms ease;
 }
 
-.searchField input,
-.filterField select {
+.searchField input {
   height: 38px;
   font-size: 12px;
 }
@@ -276,12 +272,7 @@
   padding: 0 12px 0 35px;
 }
 
-.filterField select {
-  padding: 0 28px 0 10px;
-}
-
 .searchField input:focus,
-.filterField select:focus,
 .field input:focus {
   border-color: var(--brand-primary);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand-primary) 14%, transparent);
@@ -373,17 +364,6 @@
   overflow: hidden;
   color: var(--ink-900);
   font-size: 13px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.categoryBadge {
-  flex: 0 0 auto;
-  max-width: 120px;
-  padding: 3px 7px;
-  overflow: hidden;
-  color: var(--brand-primary);
-  background: color-mix(in srgb, var(--brand-primary) 12%, var(--white));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -572,13 +552,6 @@
 .fieldError {
   color: var(--danger);
   font-weight: 700;
-}
-
-.categoryPreview {
-  margin-left: 4px;
-  padding: 2px 6px;
-  color: var(--brand-primary);
-  background: var(--blue-100);
 }
 
 .previewLink {

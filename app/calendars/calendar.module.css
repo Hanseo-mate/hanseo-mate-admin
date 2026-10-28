@@ -455,6 +455,18 @@
   background: #e2e8ff;
 }
 
+.schoolDayEvent {
+  border-left-color: #b7791f;
+  color: #854d0e;
+  background: #fff7df;
+  cursor: default;
+}
+
+.schoolDayEvent:hover {
+  color: #854d0e;
+  background: #fff7df;
+}
+
 .pastDayEvent {
   border-left-color: #98a2b3;
   color: #667085;
@@ -464,6 +476,13 @@
 .pastDayEvent:hover {
   color: #475467;
   background: #e9ecef;
+}
+
+.schoolDayEvent.pastDayEvent,
+.schoolDayEvent.pastDayEvent:hover {
+  border-left-color: #c7a566;
+  color: #7a6a4c;
+  background: #f7f4ed;
 }
 
 .selectedDayEvent {
@@ -546,7 +565,7 @@
 
 .listItem {
   display: grid;
-  grid-template-columns: 30px minmax(0, 1fr) auto 18px;
+  grid-template-columns: 30px minmax(0, 1fr) auto 34px;
   gap: 9px;
   width: 100%;
   min-height: 66px;
@@ -565,6 +584,14 @@
 .listItem:hover:not(:disabled),
 .selectedListItem {
   background: #f8faff;
+}
+
+.readOnlyListItem {
+  cursor: default;
+}
+
+.readOnlyListItem:hover {
+  background: #fff;
 }
 
 .listDate {
@@ -597,6 +624,9 @@
 }
 
 .listItemCopy small {
+  display: flex;
+  align-items: center;
+  gap: 5px;
   margin-top: 3px;
   overflow: hidden;
   color: var(--calendar-text-secondary);
@@ -604,6 +634,26 @@
   line-height: 1.4;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.sourceBadge {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  padding: 1px 5px;
+  border-radius: 999px;
+  font-size: 8px;
+  font-weight: 750;
+}
+
+.studentCouncilBadge {
+  color: #2947a8;
+  background: var(--calendar-accent-soft);
+}
+
+.schoolBadge {
+  color: #854d0e;
+  background: #fff3cd;
 }
 
 .timingBadge {
@@ -627,7 +677,15 @@
 }
 
 .listEditIcon {
+  justify-self: center;
   color: var(--calendar-text-muted);
+}
+
+.readOnlyLabel {
+  justify-self: center;
+  color: #8a6a2e;
+  font-size: 9px;
+  font-weight: 700;
 }
 
 .listFooter {
@@ -1055,7 +1113,7 @@
   }
 
   .listItem {
-    grid-template-columns: 30px minmax(0, 1fr) 18px;
+    grid-template-columns: 30px minmax(0, 1fr) 34px;
   }
 
   .timingBadge {

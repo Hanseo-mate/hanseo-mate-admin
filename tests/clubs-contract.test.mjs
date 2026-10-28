@@ -6,6 +6,7 @@ import {
   clubFormToUpdatePayload,
   getClubCategoryLabel,
   isValidHttpUrl,
+  moveClub,
   parseClubDetail,
   parseClubSummaries,
 } from "../app/lib/clubs.ts";
@@ -25,8 +26,32 @@ test("parses the updated administrator club list response", () => {
 
   assert.equal(clubs.length, 1);
   assert.equal(clubs[0].id, 7);
+  assert.equal(Object.hasOwn(clubs[0], "displayOrder"), false);
   assert.equal(getClubCategoryLabel(clubs[0].category), "취미");
   assert.deepEqual(clubs[0].topReviewTags, ["ENJOY_HOBBY", "FRIENDLY_MEMBERS"]);
+});
+
+test("moves a club within the full list without losing or duplicating IDs", () => {
+  const clubs = [{ id: 3 }, { id: 1 }, { id: 2 }];
+  const moved = moveClub(clubs, 2, 0);
+  assert.deepEqual(moved.map((club) => club.id), [2, 3, 1]);
+  assert.deepEqual(clubs.map((club) => club.id), [3, 1, 2]);
+  assert.deepEqual(moveClub(moved, 0, -1), moved);
+});
+
+test("keeps the server's array order without a display order field", () => {
+  const clubs = parseClubSummaries([3, 1, 2].map((id) => ({
+    id,
+    name: `동아리 ${id}`,
+    category: "ACADEMIC",
+    profileImageUrl: null,
+    shortDescription: null,
+    likeCount: 0,
+    topReviewTags: [],
+  })));
+
+  assert.deepEqual(clubs.map((club) => club.id), [3, 1, 2]);
+  assert.equal(clubs.every((club) => !Object.hasOwn(club, "displayOrder")), true);
 });
 
 test("rejects unsupported categories with a user-friendly message", () => {

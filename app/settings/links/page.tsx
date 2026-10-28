@@ -27,14 +27,12 @@ import { ApiError, apiFetch, getErrorText } from "../../lib/api";
 import { ADMIN_SESSION_EVENT, getAdminSession } from "../../lib/auth";
 import {
   ADMIN_LINKS_ENDPOINT,
-  LINKS_ENDPOINT,
   type LinkFieldErrors,
   type LinkForm,
   type ManagedLink,
   formFromManagedLink,
   isValidExternalLinkUrl,
   linkFormSignature,
-  normalizeLinkCategory,
   parseManagedLink,
   parseManagedLinks,
   validateLinkForm,
@@ -54,7 +52,7 @@ type PendingAction =
   | { kind: "refresh" }
   | null;
 
-const emptyForm: LinkForm = { name: "", url: "", category: "" };
+const emptyForm: LinkForm = { name: "", url: "" };
 const emptyFormBaseline = linkFormSignature(emptyForm);
 const dateTimeFormatter = new Intl.DateTimeFormat("ko-KR", {
   year: "numeric",
@@ -116,36 +114,24 @@ export default function ManageLinksPage() {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [pendingAction, setPendingAction] = useState<PendingAction>(null);
   const [query, setQuery] = useState("");
-  const [categoryFilter, setCategoryFilter] = useState("");
 
   const listController = useRef<AbortController | null>(null);
   const detailController = useRef<AbortController | null>(null);
   const mutationInProgress = useRef(false);
-  const selectedIdRef = useRef<number | null>(null);
   const editorRef = useRef<HTMLElement | null>(null);
   const nameInputRef = useRef<HTMLInputElement | null>(null);
   const urlInputRef = useRef<HTMLInputElement | null>(null);
-  const categoryInputRef = useRef<HTMLInputElement | null>(null);
 
   const isBusy = Boolean(busyAction);
   const isCreateMode = selected === null;
   const isDirty = linkFormSignature(form) !== baseline;
-  const normalizedCategory = normalizeLinkCategory(form.category);
   const canPreviewUrl = isValidExternalLinkUrl(form.url);
 
-  const categories = useMemo(
-    () => Array.from(new Set(links.map((link) => link.category))).sort((a, b) => a.localeCompare(b, "ko")),
-    [links],
-  );
   const filteredLinks = useMemo(() => {
     const normalizedQuery = query.trim().toLocaleLowerCase("ko-KR");
-    return links.filter((link) => {
-      const matchesCategory = !categoryFilter || link.category === categoryFilter;
-      const matchesQuery = !normalizedQuery || [link.name, link.url, link.category]
-        .some((value) => value.toLocaleLowerCase("ko-KR").includes(normalizedQuery));
-      return matchesCategory && matchesQuery;
-    });
-  }, [categoryFilter, links, query]);
+    return links.filter((link) => !normalizedQuery || [link.name, link.url]
+      .some((value) => value.toLocaleLowerCase("ko-KR").includes(normalizedQuery)));
+  }, [links, query]);
 
   const focusEditor = useCallback((focusName = false) => {
     window.requestAnimationFrame(() => {
@@ -157,7 +143,6 @@ export default function ManageLinksPage() {
   }, []);
 
   const enterCreateMode = useCallback((focusName = false) => {
-    selectedIdRef.current = null;
     setSelected(null);
     setForm({ ...emptyForm });
     setBaseline(emptyFormBaseline);
@@ -168,7 +153,6 @@ export default function ManageLinksPage() {
 
   const enterEditMode = useCallback((link: ManagedLink, reveal = false) => {
     const nextForm = formFromManagedLink(link);
-    selectedIdRef.current = link.id;
     setSelected(link);
     setForm(nextForm);
     setBaseline(linkFormSignature(nextForm));
@@ -177,7 +161,7 @@ export default function ManageLinksPage() {
     if (reveal) focusEditor(false);
   }, [focusEditor]);
 
-  const loadLinks = useCallback(async (selectId?: number | null) => {
+  const loadLinks = useCallback(async () => {
     listController.current?.abort();
     const controller = new AbortController();
     listController.current = controller;
@@ -185,7 +169,7 @@ export default function ManageLinksPage() {
     setListError("");
 
     try {
-      const response = await apiFetch<unknown>(LINKS_ENDPOINT, {
+      const response = await apiFetch<unknown>(ADMIN_LINKS_ENDPOINT, {
         method: "GET",
         cache: "no-store",
         signal: controller.signal,
@@ -195,21 +179,6 @@ export default function ManageLinksPage() {
       const nextLinks = parseManagedLinks(response);
       setLinks(nextLinks);
       setListState("ready");
-
-      const targetId = selectId === undefined ? selectedIdRef.current : selectId;
-      if (targetId !== null) {
-        const refreshed = nextLinks.find((link) => link.id === targetId);
-        if (refreshed) {
-          enterEditMode(refreshed);
-        } else {
-          enterCreateMode();
-          setFeedback({
-            tone: "info",
-            title: "선택한 링크를 찾을 수 없습니다.",
-            message: "최신 목록으로 정리했습니다. 새 링크를 등록하거나 다른 링크를 선택해 주세요.",
-          });
-        }
-      }
     } catch (error) {
       if (controller.signal.aborted) return;
       setListState("error");
@@ -217,7 +186,7 @@ export default function ManageLinksPage() {
     } finally {
       if (listController.current === controller) listController.current = null;
     }
-  }, [enterCreateMode, enterEditMode]);
+  }, []);
 
   const loadLinkDetail = useCallback(async (linkId: number) => {
     detailController.current?.abort();
@@ -227,7 +196,7 @@ export default function ManageLinksPage() {
     setFeedback(null);
 
     try {
-      const response = await apiFetch<unknown>(`${LINKS_ENDPOINT}/${linkId}`, {
+      const response = await apiFetch<unknown>(`${ADMIN_LINKS_ENDPOINT}/${linkId}`, {
         method: "GET",
         cache: "no-store",
         signal: controller.signal,
@@ -243,7 +212,7 @@ export default function ManageLinksPage() {
           title: "해당 링크가 이미 삭제되었습니다.",
           message: "최신 목록을 다시 불러왔습니다.",
         });
-        await loadLinks(null);
+        await loadLinks();
       } else {
         setFeedback({
           tone: "error",
@@ -260,7 +229,7 @@ export default function ManageLinksPage() {
   useEffect(() => {
     const handleSessionChange = () => {
       if (getAdminSession()) {
-        void loadLinks(null);
+        void loadLinks();
         return;
       }
 
@@ -349,7 +318,7 @@ export default function ManageLinksPage() {
     }
     setFeedback(null);
     enterCreateMode();
-    void loadLinks(null);
+    void loadLinks();
   }
 
   function resetForm() {
@@ -368,7 +337,6 @@ export default function ManageLinksPage() {
     setFieldErrors(validation.errors);
     if (validation.errors.name) nameInputRef.current?.focus();
     else if (validation.errors.url) urlInputRef.current?.focus();
-    else if (validation.errors.category) categoryInputRef.current?.focus();
     return null;
   }
 
@@ -395,7 +363,7 @@ export default function ManageLinksPage() {
           title: "링크를 등록했습니다.",
           message: "새 링크가 목록에 반영되었습니다.",
         });
-        await loadLinks(created.id);
+        await loadLinks();
       } else if (selected) {
         const original = selected;
         const updated = parseManagedLink(await apiFetch<unknown>(`${ADMIN_LINKS_ENDPOINT}/${selected.id}`, {
@@ -410,9 +378,9 @@ export default function ManageLinksPage() {
         setFeedback({
           tone: "success",
           title: "링크를 수정했습니다.",
-          message: "변경한 이름, 주소, 카테고리가 저장되었습니다.",
+          message: "변경한 이름과 주소가 저장되었습니다.",
         });
-        await loadLinks(updated.id);
+        await loadLinks();
       }
     } catch (error) {
       if (error instanceof ApiError && error.status === 404) {
@@ -422,7 +390,7 @@ export default function ManageLinksPage() {
           title: "해당 링크가 이미 삭제되었습니다.",
           message: "최신 목록을 다시 불러왔습니다.",
         });
-        await loadLinks(null);
+        await loadLinks();
       } else {
         setFeedback({
           tone: "error",
@@ -451,7 +419,7 @@ export default function ManageLinksPage() {
         title: "링크를 삭제했습니다.",
         message: "선택한 링크가 목록에서 영구 삭제되었습니다.",
       });
-      await loadLinks(null);
+      await loadLinks();
     } catch (error) {
       setDeleteOpen(false);
       if (error instanceof ApiError && error.status === 404) {
@@ -461,7 +429,7 @@ export default function ManageLinksPage() {
           title: "해당 링크가 이미 삭제되었습니다.",
           message: "최신 목록을 다시 불러왔습니다.",
         });
-        await loadLinks(null);
+        await loadLinks();
       } else {
         setFeedback({
           tone: "error",
@@ -533,7 +501,7 @@ export default function ManageLinksPage() {
                 <span className={styles.panelIcon} aria-hidden="true"><LinkSimple size={20} /></span>
                 <div>
                   <h3 id="links-list-title">링크 목록</h3>
-                  <p>이름, 주소 또는 카테고리로 찾을 수 있습니다.</p>
+                  <p>이름 또는 주소로 찾을 수 있습니다.</p>
                 </div>
               </div>
               <span className={styles.countBadge}>
@@ -551,13 +519,6 @@ export default function ManageLinksPage() {
                   onChange={(event) => setQuery(event.target.value)}
                   placeholder="링크 검색"
                 />
-              </label>
-              <label className={styles.filterField}>
-                <span className="sr-only">카테고리 필터</span>
-                <select value={categoryFilter} onChange={(event) => setCategoryFilter(event.target.value)}>
-                  <option value="">모든 카테고리</option>
-                  {categories.map((category) => <option key={category} value={category}>{category}</option>)}
-                </select>
               </label>
             </div>
 
@@ -577,7 +538,7 @@ export default function ManageLinksPage() {
                   <WarningCircle size={27} aria-hidden="true" />
                   <strong>링크 목록을 불러오지 못했습니다.</strong>
                   <p>{listError}</p>
-                  <button className={`${styles.button} ${styles.secondaryButton}`} type="button" onClick={() => void loadLinks(null)}>
+                  <button className={`${styles.button} ${styles.secondaryButton}`} type="button" onClick={() => void loadLinks()}>
                     다시 시도
                   </button>
                 </div>
@@ -586,7 +547,11 @@ export default function ManageLinksPage() {
                   <LinkSimple size={28} aria-hidden="true" />
                   <strong>등록된 링크가 없습니다.</strong>
                   <p>학생들에게 필요한 첫 링크를 등록해 보세요.</p>
-                  <button className={`${styles.button} ${styles.primaryButton}`} type="button" onClick={requestCreateMode}>
+                  <button
+                    className={`${styles.button} ${styles.primaryButton}`}
+                    type="button"
+                    onClick={requestCreateMode}
+                  >
                     <Plus size={17} aria-hidden="true" /> 첫 링크 등록
                   </button>
                 </div>
@@ -594,8 +559,8 @@ export default function ManageLinksPage() {
                 <div className={styles.statePanel} role="status">
                   <MagnifyingGlass size={28} aria-hidden="true" />
                   <strong>검색 결과가 없습니다.</strong>
-                  <p>검색어나 카테고리를 바꿔 보세요.</p>
-                  <button className={`${styles.button} ${styles.secondaryButton}`} type="button" onClick={() => { setQuery(""); setCategoryFilter(""); }}>
+                  <p>검색어를 바꿔 보세요.</p>
+                  <button className={`${styles.button} ${styles.secondaryButton}`} type="button" onClick={() => setQuery("")}>
                     검색 초기화
                   </button>
                 </div>
@@ -616,7 +581,6 @@ export default function ManageLinksPage() {
                           <span className={styles.linkCopy}>
                             <span className={styles.linkTopline}>
                               <strong>{link.name}</strong>
-                              <span className={styles.categoryBadge}>{link.category}</span>
                             </span>
                             <span className={styles.host}>{linkHost(link.url)}</span>
                             <time dateTime={link.updatedAt}>최근 수정 {formatDateTime(link.updatedAt)}</time>
@@ -640,7 +604,7 @@ export default function ManageLinksPage() {
               <div>
                 <span className={styles.modeLabel}>{isCreateMode ? "새 링크" : "링크 수정"}</span>
                 <h3 id="link-editor-title">{isCreateMode ? "새 링크 등록" : "선택한 링크 수정"}</h3>
-                <p>{isCreateMode ? "이름, 주소, 카테고리를 입력해 주세요." : "세 항목을 모두 확인한 뒤 저장해 주세요."}</p>
+                <p>{isCreateMode ? "이름과 주소를 입력해 주세요." : "이름과 주소를 확인한 뒤 저장해 주세요."}</p>
               </div>
               {isDirty && <span className={styles.unsavedBadge}>저장 전 변경</span>}
             </header>
@@ -699,32 +663,6 @@ export default function ManageLinksPage() {
                   )}
                 </label>
 
-                <label className={styles.field} htmlFor="managed-link-category">
-                  <span className={styles.fieldHeading}><span>카테고리 <em>필수</em></span><small>{normalizedCategory.length} / 50</small></span>
-                  <input
-                    ref={categoryInputRef}
-                    id="managed-link-category"
-                    name="category"
-                    type="text"
-                    value={form.category}
-                    maxLength={50}
-                    list="managed-link-categories"
-                    placeholder="예: SCHOOL 또는 학교생활"
-                    aria-invalid={Boolean(fieldErrors.category) || undefined}
-                    aria-describedby={`managed-link-category-help${fieldErrors.category ? " managed-link-category-error" : ""}`}
-                    onChange={(event) => updateField("category", event.target.value)}
-                    onBlur={() => validateFieldOnBlur("category")}
-                    required
-                  />
-                  <datalist id="managed-link-categories">
-                    {categories.map((category) => <option key={category} value={category} />)}
-                  </datalist>
-                  <span id="managed-link-category-help" className={styles.fieldHelp}>
-                    자유롭게 입력할 수 있으며, 영문은 저장할 때 대문자로 정리됩니다.
-                    {normalizedCategory && <span className={styles.categoryPreview}> 저장값: {normalizedCategory}</span>}
-                  </span>
-                  {fieldErrors.category && <span id="managed-link-category-error" className={styles.fieldError}>{fieldErrors.category}</span>}
-                </label>
               </fieldset>
 
               <div className={styles.formActions}>

@@ -14,6 +14,8 @@
 - `/posters/manage` 홈 포스터 이미지·클릭 링크 등록·교체·삭제
 - `/popups/manage` 앱 팝업 조회·등록·수정·삭제
 - `/settings/festival-floating-button` 앱 홈의 대동제 플로팅 버튼 노출 제어
+- `/settings/home-message` 전체 사용자에게 표시할 메인페이지 메시지 조회·저장·해제
+- `/settings/links` 외부 링크 조회·등록·수정·삭제
 - `/settings/app-updates` iOS·Android 스토어 앱 업데이트 정책 조회·초안·게시·예약·롤백·감사 이력
 - `/clubs/manage` 동아리 목록·상세·소개·이미지 관리
 - `/clubs/new` 동아리 기본 등록
@@ -53,5 +55,5 @@ Firebase 프로젝트와 Hosting 사이트 ID는 `hsmate-admin`입니다.
 
 운영 API는 HTTPS를 사용합니다. 실제 CRUD 운영 전 다음 항목을 확인합니다.
 
-1. Firebase Hosting과 Sites 도메인 CORS 허용
+1. 운영 API에서 `https://hsmate-admin.web.app` Origin을 허용하고, 관리자 요청의 `Authorization` 및 `Content-Type` 헤더와 GET·POST·PUT·DELETE 메서드의 CORS 사전 요청을 허용
 2. 서버 측 관리자 인증과 권한 검사

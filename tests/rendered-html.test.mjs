@@ -11,6 +11,7 @@ const exportedPages = [
   { path: "out/settings/festival-floating-button/index.html", text: "축제 플로팅 버튼" },
   { path: "out/settings/app-updates/index.html", text: "앱 업데이트" },
   { path: "out/settings/links/index.html", text: "각종 링크" },
+  { path: "out/settings/home-message/index.html", text: "메인페이지 메시지" },
   { path: "out/notices/new/index.html", text: "공지 등록" },
   { path: "out/notices/manage/index.html", text: "학생회 공지" },
   { path: "out/system-notices/manage/index.html", text: "시스템 공지" },
@@ -85,6 +86,7 @@ test("does not show implementation jargon in staff-facing copy", async () => {
     "app/settings/festival-floating-button/page.tsx",
     "app/settings/app-updates/page.tsx",
     "app/settings/links/page.tsx",
+    "app/settings/home-message/page.tsx",
     "app/notices/new/page.tsx",
     "app/notices/manage/page.tsx",
     "app/system-notices/manage/page.tsx",
@@ -126,6 +128,8 @@ test("keeps deployment configuration aligned with static export and the producti
 
   assert.match(firebaseConfig, /"public": "out"/);
   assert.match(firebaseConfig, /"trailingSlash": true/);
+  assert.match(firebaseConfig, /"key": "Cache-Control",\s*"value": "no-cache"/);
+  assert.match(firebaseConfig, /"key": "Cache-Control",\s*"value": "public,max-age=31536000,immutable"/);
   assert.match(firebaseConfig, /connect-src 'self' https:\/\/api\.hsmate\.win/);
   assert.match(apiSource, /"https:\/\/api\.hsmate\.win"/);
   assert.equal(envExample.trim(), "NEXT_PUBLIC_API_BASE_URL=https://api.hsmate.win");
