@@ -185,8 +185,7 @@ export default function AdminLoginPage() {
       <aside className="panel login-guide-panel">
         <h2>로그인 도움말</h2>
         <ol>
-          <li><span>1</span><p>학생회에서 안내받은 아이디와 비밀번호를 입력해 주세요.</p></li>
-          <li><span>2</span><p>공용 기기에서는 작업 후 꼭 로그아웃해 주세요.</p></li>
+          <li><span>1</span><p>공용 기기에서는 작업 후 꼭 로그아웃해 주세요.</p></li>
         </ol>
       </aside>
     </div>
