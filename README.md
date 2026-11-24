@@ -50,10 +50,11 @@ npm run deploy:firebase
 ```
 
 Firebase 프로젝트와 Hosting 사이트 ID는 `hsmate-admin`입니다.
+운영 관리자 주소는 `https://hsmate.win`입니다. `https://hsmate-admin.web.app`는 같은 Hosting 사이트의 Firebase 기본 주소이며, 배포는 두 주소에 함께 반영됩니다.
 
 ## 운영 전 확인 사항
 
 운영 API는 HTTPS를 사용합니다. 실제 CRUD 운영 전 다음 항목을 확인합니다.
 
-1. 운영 API에서 `https://hsmate-admin.web.app` Origin을 허용하고, 관리자 요청의 `Authorization` 및 `Content-Type` 헤더와 GET·POST·PUT·DELETE 메서드의 CORS 사전 요청을 허용
+1. 운영 API에서 `https://hsmate.win` 및 `https://hsmate-admin.web.app` Origin을 허용하고, 관리자 요청의 `Authorization` 및 `Content-Type` 헤더와 GET·POST·PUT·DELETE 메서드의 CORS 사전 요청을 허용
 2. 서버 측 관리자 인증과 권한 검사

@@ -29,7 +29,8 @@ import {
   initialClubForm,
   isValidHttpUrl,
   parseClubDetail,
-  parseClubSummaries,
+  parseClubListResponse,
+  validateClubRecruitment,
 } from "../../lib/clubs";
 
 type ImageKind = "profile" | "background";
@@ -83,6 +84,7 @@ function updateUrlClubId(clubId: number | null) {
 export default function ManageClubPage() {
   const [hasSession, setHasSession] = useState<boolean | null>(null);
   const [clubs, setClubs] = useState<ClubSummary[]>([]);
+  const [totalCount, setTotalCount] = useState(0);
   const [listState, setListState] = useState<ListState>("idle");
   const [listError, setListError] = useState("");
   const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>("ALL");
@@ -171,8 +173,9 @@ export default function ManageClubPage() {
       });
       if (controller.signal.aborted) return;
 
-      const nextClubs = parseClubSummaries(payload);
+      const { clubs: nextClubs, totalCount: nextTotalCount } = parseClubListResponse(payload);
       setClubs(nextClubs);
+      setTotalCount(nextTotalCount);
       setListState("ready");
       setSelectedClub((current) => {
         if (!current) return null;
@@ -207,6 +210,7 @@ export default function ManageClubPage() {
       if (!available) {
         setListState("idle");
         setClubs([]);
+        setTotalCount(0);
       }
     };
 
@@ -290,6 +294,11 @@ export default function ManageClubPage() {
       setFeedback({ tone: "error", title: "링크를 확인해 주세요.", message: "올바른 웹 주소를 입력해 주세요. 예: https://instagram.com/..." });
       return;
     }
+    const recruitmentError = validateClubRecruitment(form);
+    if (recruitmentError) {
+      setFeedback({ tone: "error", title: "모집공고를 확인해 주세요.", message: recruitmentError });
+      return;
+    }
 
     const id = selectedClub.id;
     setBusyAction("details");
@@ -308,6 +317,10 @@ export default function ManageClubPage() {
         instagramUrl: payload.instagramUrl ?? "",
         kakaoTalkUrl: payload.kakaoTalkUrl ?? "",
         recruitmentContent: payload.recruitmentContent ?? "",
+        recruitmentStartDate: payload.recruitmentStartDate ?? "",
+        recruitmentEndDate: payload.recruitmentEndDate ?? "",
+        recruitmentUrl: payload.recruitmentUrl ?? "",
+        recruitmentAlwaysOpen: payload.recruitmentAlwaysOpen,
       };
       setForm(normalizedForm);
       setBaseline(JSON.stringify(normalizedForm));
@@ -408,6 +421,9 @@ export default function ManageClubPage() {
       if (target === "club") {
         await apiFetch<void>(`/api/admin/clubs/${id}`, { method: "DELETE" });
         setClubs((current) => current.filter((club) => club.id !== id));
+        if (clubs.some((club) => club.id === id)) {
+          setTotalCount((current) => Math.max(0, current - 1));
+        }
         clearSelection();
         setFeedback({ tone: "success", title: `${clubName} 삭제 완료`, message: "동아리 정보와 사진, 좋아요, 후기가 함께 삭제되었습니다." });
       } else {
@@ -461,7 +477,7 @@ export default function ManageClubPage() {
               <span className="eyebrow dark">수정 대상 선택</span>
               <h2 id="club-list-title">동아리 목록</h2>
             </div>
-            <span>{listState === "ready" ? `${clubs.length}개` : "-"}</span>
+            <span>{listState === "ready" ? `${totalCount}개` : "-"}</span>
           </div>
 
           <div className="club-list-controls">
@@ -661,6 +677,26 @@ export default function ManageClubPage() {
                         <label className="field-group full-span">
                           <span className="field-label">모집 안내 <small>선택 · 긴 글 가능</small></span>
                           <textarea rows={7} value={form.recruitmentContent} placeholder="모집 대상, 일정, 지원 방법 등을 작성해 주세요." onChange={(event) => setField("recruitmentContent", event.target.value)} />
+                        </label>
+                        <label className="field-group full-span">
+                          <span className="field-label">상시모집 여부</span>
+                          <select value={String(form.recruitmentAlwaysOpen)} onChange={(event) => setField("recruitmentAlwaysOpen", event.target.value === "true")}>
+                            <option value="false">기간에 따라 모집</option>
+                            <option value="true">상시모집</option>
+                          </select>
+                          <small className="field-help">상시모집이면 날짜와 관계없이 모집 중으로 표시합니다.</small>
+                        </label>
+                        <label className="field-group">
+                          <span className="field-label">모집 시작일 <small>선택</small></span>
+                          <input type="date" value={form.recruitmentStartDate} onChange={(event) => setField("recruitmentStartDate", event.target.value)} />
+                        </label>
+                        <label className="field-group">
+                          <span className="field-label">모집 종료일 <small>선택</small></span>
+                          <input type="date" value={form.recruitmentEndDate} min={!form.recruitmentAlwaysOpen && form.recruitmentStartDate ? form.recruitmentStartDate : undefined} onChange={(event) => setField("recruitmentEndDate", event.target.value)} />
+                        </label>
+                        <label className="field-group full-span">
+                          <span className="field-label">신청 링크 <small>선택</small></span>
+                          <input type="url" value={form.recruitmentUrl} maxLength={2048} placeholder="https://example.com/apply" onChange={(event) => setField("recruitmentUrl", event.target.value)} />
                         </label>
                       </div>
                     </fieldset>
