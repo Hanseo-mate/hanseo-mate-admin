@@ -48,6 +48,11 @@ export type ClubSummary = {
   topReviewTags: string[];
 };
 
+export type ClubListResponse = {
+  totalCount: number;
+  clubs: ClubSummary[];
+};
+
 export type ClubDetail = {
   backgroundImageUrl: string | null;
   profileImageUrl: string | null;
@@ -60,27 +65,46 @@ export type ClubDetail = {
   instagramUrl: string | null;
   kakaoTalkUrl: string | null;
   recruitmentContent: string | null;
+  recruitmentStartDate: string | null;
+  recruitmentEndDate: string | null;
+  recruitmentUrl: string | null;
+  recruitmentAlwaysOpen: boolean;
   reviewerCount: number;
 };
 
-export type ClubForm = {
+export type ClubRecruitmentForm = {
+  recruitmentContent: string;
+  recruitmentStartDate: string;
+  recruitmentEndDate: string;
+  recruitmentUrl: string;
+  recruitmentAlwaysOpen: boolean;
+};
+
+export const initialClubRecruitmentForm: ClubRecruitmentForm = {
+  recruitmentContent: "",
+  recruitmentStartDate: "",
+  recruitmentEndDate: "",
+  recruitmentUrl: "",
+  recruitmentAlwaysOpen: false,
+};
+
+export type ClubForm = ClubRecruitmentForm & {
   name: string;
   shortDescription: string;
   introduction: string;
   activityContent: string;
   instagramUrl: string;
   kakaoTalkUrl: string;
-  recruitmentContent: string;
 };
 
 export const initialClubForm: ClubForm = {
+  ...initialClubRecruitmentForm,
   name: "",
   shortDescription: "",
   introduction: "",
   activityContent: "",
   instagramUrl: "",
   kakaoTalkUrl: "",
-  recruitmentContent: "",
 };
 
 const categoryValues = new Set<string>(clubCategories.map((item) => item.value));
@@ -144,12 +168,13 @@ export function getReviewTagLabel(value: string) {
   return reviewTagLabels[value] ?? value;
 }
 
-export function parseClubSummaries(payload: unknown): ClubSummary[] {
-  if (!Array.isArray(payload)) {
+export function parseClubListResponse(payload: unknown): ClubListResponse {
+  if (!isRecord(payload) || !Array.isArray(payload.clubs) ||
+      !Number.isInteger(payload.totalCount) || Number(payload.totalCount) < 0) {
     invalidClubData();
   }
 
-  return payload.map((value) => {
+  const clubs = payload.clubs.map((value) => {
     if (!isRecord(value)) {
       invalidClubData();
     }
@@ -167,6 +192,8 @@ export function parseClubSummaries(payload: unknown): ClubSummary[] {
       topReviewTags: reviewTags(value.topReviewTags).slice(0, 2),
     };
   });
+
+  return { totalCount: Number(payload.totalCount), clubs };
 }
 
 export function moveClub<T>(clubs: readonly T[], fromIndex: number, toIndex: number): T[] {
@@ -196,6 +223,10 @@ export function parseClubDetail(payload: unknown): ClubDetail {
     instagramUrl: nullableString(payload.instagramUrl),
     kakaoTalkUrl: nullableString(payload.kakaoTalkUrl),
     recruitmentContent: nullableString(payload.recruitmentContent),
+    recruitmentStartDate: nullableString(payload.recruitmentStartDate),
+    recruitmentEndDate: nullableString(payload.recruitmentEndDate),
+    recruitmentUrl: nullableString(payload.recruitmentUrl),
+    recruitmentAlwaysOpen: nullableBoolean(payload.recruitmentAlwaysOpen),
     reviewerCount: nonNegativeNumber(payload.reviewerCount),
   };
 }
@@ -209,12 +240,55 @@ export function clubDetailToForm(detail: ClubDetail): ClubForm {
     instagramUrl: detail.instagramUrl ?? "",
     kakaoTalkUrl: detail.kakaoTalkUrl ?? "",
     recruitmentContent: detail.recruitmentContent ?? "",
+    recruitmentStartDate: detail.recruitmentStartDate ?? "",
+    recruitmentEndDate: detail.recruitmentEndDate ?? "",
+    recruitmentUrl: detail.recruitmentUrl ?? "",
+    recruitmentAlwaysOpen: detail.recruitmentAlwaysOpen,
   };
 }
 
 function nullable(value: string) {
   const trimmed = value.trim();
   return trimmed ? trimmed : null;
+}
+
+function nullableBoolean(value: unknown) {
+  if (value === null || value === undefined) return false;
+  if (typeof value !== "boolean") invalidClubData();
+  return value;
+}
+
+export function clubRecruitmentFormToPayload(form: ClubRecruitmentForm) {
+  return {
+    recruitmentContent: nullable(form.recruitmentContent),
+    recruitmentStartDate: nullable(form.recruitmentStartDate),
+    recruitmentEndDate: nullable(form.recruitmentEndDate),
+    recruitmentUrl: nullable(form.recruitmentUrl),
+    recruitmentAlwaysOpen: form.recruitmentAlwaysOpen,
+  };
+}
+
+function isValidDate(value: string) {
+  if (!value) return true;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const date = new Date(`${value}T00:00:00.000Z`);
+  return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value;
+}
+
+export function validateClubRecruitment(form: ClubRecruitmentForm): string | null {
+  const payload = clubRecruitmentFormToPayload(form);
+  if (!isValidDate(payload.recruitmentStartDate ?? "") ||
+      !isValidDate(payload.recruitmentEndDate ?? "")) {
+    return "모집 시작일과 종료일을 올바른 날짜로 입력해 주세요.";
+  }
+  if (!payload.recruitmentAlwaysOpen && payload.recruitmentStartDate &&
+      payload.recruitmentEndDate && payload.recruitmentStartDate > payload.recruitmentEndDate) {
+    return "모집 종료일은 시작일과 같거나 이후여야 합니다.";
+  }
+  if ((payload.recruitmentUrl?.length ?? 0) > 2048 || !isValidHttpUrl(form.recruitmentUrl)) {
+    return "신청 링크는 2048자 이하의 올바른 웹 주소로 입력해 주세요. 예: https://forms.gle/...";
+  }
+  return null;
 }
 
 export function clubFormToUpdatePayload(form: ClubForm) {
@@ -225,7 +299,7 @@ export function clubFormToUpdatePayload(form: ClubForm) {
     activityContent: nullable(form.activityContent),
     instagramUrl: nullable(form.instagramUrl),
     kakaoTalkUrl: nullable(form.kakaoTalkUrl),
-    recruitmentContent: nullable(form.recruitmentContent),
+    ...clubRecruitmentFormToPayload(form),
   };
 }
 

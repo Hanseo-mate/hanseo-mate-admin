@@ -9,7 +9,7 @@ import {
   type ClubSummary,
   getClubCategoryLabel,
   moveClub,
-  parseClubSummaries,
+  parseClubListResponse,
 } from "../../lib/clubs";
 import styles from "./club-order.module.css";
 
@@ -40,6 +40,7 @@ function clubIdAtPoint(x: number, y: number) {
 
 export function ClubOrderPanel({ onClose }: { onClose: () => void }) {
   const [clubs, setClubs] = useState<ClubSummary[]>([]);
+  const [totalCount, setTotalCount] = useState(0);
   const [savedIds, setSavedIds] = useState<number[]>([]);
   const [state, setState] = useState<"loading" | "ready" | "error">("loading");
   const [loadingError, setLoadingError] = useState("");
@@ -71,8 +72,9 @@ export function ClubOrderPanel({ onClose }: { onClose: () => void }) {
         signal: controller.signal,
       });
       if (controller.signal.aborted) return false;
-      const nextClubs = parseClubSummaries(response);
+      const { clubs: nextClubs, totalCount: nextTotalCount } = parseClubListResponse(response);
       setClubs(nextClubs);
+      setTotalCount(nextTotalCount);
       setSavedIds(idsOf(nextClubs));
       setState("ready");
       return true;
@@ -235,7 +237,7 @@ export function ClubOrderPanel({ onClose }: { onClose: () => void }) {
       {state === "ready" && (
         <>
           <div className={styles.summary}>
-            <span>전체 {clubs.length}개 동아리</span>
+            <span>전체 {totalCount}개 동아리</span>
             {isDirty && <span className="badge badge-warning">저장하지 않은 순서</span>}
           </div>
           {clubs.length === 0 ? (

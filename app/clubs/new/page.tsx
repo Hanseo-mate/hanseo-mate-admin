@@ -7,17 +7,28 @@ import { AdminLoginNotice } from "../../components/AdminLoginNotice";
 import { UnsavedChangesDialog } from "../../components/UnsavedChangesDialog";
 import { getAdminSession } from "../../lib/auth";
 import { apiFetch, getErrorText } from "../../lib/api";
-import { clubCategories } from "../../lib/clubs";
+import {
+  type ClubRecruitmentForm,
+  clubCategories,
+  clubRecruitmentFormToPayload,
+  initialClubRecruitmentForm,
+  validateClubRecruitment,
+} from "../../lib/clubs";
 
 type CreatedClub = { id: number };
 
 export default function NewClubPage() {
   const [name, setName] = useState("");
   const [category, setCategory] = useState("");
+  const [recruitment, setRecruitment] = useState<ClubRecruitmentForm>({ ...initialClubRecruitmentForm });
   const [busy, setBusy] = useState(false);
   const [createdId, setCreatedId] = useState<number | null>(null);
   const [error, setError] = useState("");
   const submittingRef = useRef(false);
+
+  function setRecruitmentField<K extends keyof ClubRecruitmentForm>(key: K, value: ClubRecruitmentForm[K]) {
+    setRecruitment((current) => ({ ...current, [key]: value }));
+  }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -39,6 +50,11 @@ export default function NewClubPage() {
       setError("동아리 분과를 선택해 주세요.");
       return;
     }
+    const recruitmentError = validateClubRecruitment(recruitment);
+    if (recruitmentError) {
+      setError(recruitmentError);
+      return;
+    }
 
     submittingRef.current = true;
     setBusy(true);
@@ -46,7 +62,7 @@ export default function NewClubPage() {
       const response = await apiFetch<CreatedClub>("/api/admin/clubs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: trimmedName, category }),
+        body: JSON.stringify({ name: trimmedName, category, ...clubRecruitmentFormToPayload(recruitment) }),
       });
       setCreatedId(response.id);
     } catch (requestError) {
@@ -59,14 +75,14 @@ export default function NewClubPage() {
 
   return (
     <AdminLoginNotice returnTo="/clubs/new">
-      <UnsavedChangesDialog dirty={createdId === null && Boolean(name || category)} />
+      <UnsavedChangesDialog dirty={createdId === null && Boolean(name || category || JSON.stringify(recruitment) !== JSON.stringify(initialClubRecruitmentForm))} />
       <div className="form-page-grid club-create-grid">
         <section className="panel form-panel">
         <div className="panel-heading panel-heading-border">
           <div>
             <span className="eyebrow dark">동아리 등록</span>
             <h2>동아리 기본 정보</h2>
-            <p>이름과 분과를 입력해 동아리를 등록해 주세요.</p>
+            <p>이름과 분과를 입력하고, 모집공고가 있으면 함께 등록해 주세요.</p>
           </div>
         </div>
 
@@ -128,6 +144,31 @@ export default function NewClubPage() {
               ))}
             </div>
           </fieldset>
+
+          <label className="field-group">
+            <span className="field-label">상시모집 여부</span>
+            <select value={String(recruitment.recruitmentAlwaysOpen)} onChange={(event) => setRecruitmentField("recruitmentAlwaysOpen", event.target.value === "true")} disabled={busy}>
+              <option value="false">기간에 따라 모집</option>
+              <option value="true">상시모집</option>
+            </select>
+            <small className="field-help">상시모집이면 날짜와 관계없이 모집 중으로 표시합니다.</small>
+          </label>
+          <label className="field-group">
+            <span className="field-label">모집 시작일 <small>선택</small></span>
+            <input type="date" value={recruitment.recruitmentStartDate} onChange={(event) => setRecruitmentField("recruitmentStartDate", event.target.value)} disabled={busy} />
+          </label>
+          <label className="field-group">
+            <span className="field-label">모집 종료일 <small>선택</small></span>
+            <input type="date" value={recruitment.recruitmentEndDate} min={!recruitment.recruitmentAlwaysOpen && recruitment.recruitmentStartDate ? recruitment.recruitmentStartDate : undefined} onChange={(event) => setRecruitmentField("recruitmentEndDate", event.target.value)} disabled={busy} />
+          </label>
+          <label className="field-group">
+            <span className="field-label">신청 링크 <small>선택</small></span>
+            <input type="url" value={recruitment.recruitmentUrl} maxLength={2048} placeholder="https://example.com/apply" onChange={(event) => setRecruitmentField("recruitmentUrl", event.target.value)} disabled={busy} />
+          </label>
+          <label className="field-group">
+            <span className="field-label">모집 안내 <small>선택 · 긴 글 가능</small></span>
+            <textarea rows={5} value={recruitment.recruitmentContent} placeholder="모집 대상, 일정, 지원 방법 등을 작성해 주세요." onChange={(event) => setRecruitmentField("recruitmentContent", event.target.value)} disabled={busy} />
+          </label>
 
           <div className="form-actions form-actions-end">
             <Link className="button button-secondary" href="/clubs/manage">취소</Link>
